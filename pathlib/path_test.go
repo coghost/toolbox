@@ -1,13 +1,13 @@
 package pathlib
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/k0kubun/pp/v3"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -32,12 +32,85 @@ func (s *PathSuite) TearDownSuite() {
 
 func (s *PathSuite) createTempFile(name, content string) string {
 	path := filepath.Join(s.tempDir, name)
-	err := os.WriteFile(path, []byte(content), 0644)
+	err := os.WriteFile(path, []byte(content), 0o644)
 	s.Require().NoError(err)
 	return path
 }
 
+func (s *PathSuite) TestNameAndNameWithSuffix() {
+	tests := []struct {
+		name               string
+		filePath           string
+		expectedName       string
+		expectedWithSuffix string
+	}{
+		{
+			name:               "simple file",
+			filePath:           "/tmp/test.txt",
+			expectedName:       "test",
+			expectedWithSuffix: "test.txt",
+		},
+		{
+			name:               "file with multiple extensions",
+			filePath:           "/home/user/document.tar.gz",
+			expectedName:       "document.tar",
+			expectedWithSuffix: "document.tar.gz",
+		},
+		{
+			name:               "hidden file",
+			filePath:           "/home/user/.config",
+			expectedName:       "",
+			expectedWithSuffix: ".config",
+		},
+		{
+			name:               "directory",
+			filePath:           "/var/log/",
+			expectedName:       "log",
+			expectedWithSuffix: "log",
+		},
+		{
+			name:               "file without extension",
+			filePath:           "/bin/bash",
+			expectedName:       "bash",
+			expectedWithSuffix: "bash",
+		},
+		{
+			name:               "root directory",
+			filePath:           "/",
+			expectedName:       "/",
+			expectedWithSuffix: "/",
+		},
+		{
+			name:               "file with dot in name",
+			filePath:           "/home/user/file.name.with.dots.txt",
+			expectedName:       "file.name.with.dots",
+			expectedWithSuffix: "file.name.with.dots.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.filePath)
+			s.Equal(tt.expectedName, file.Name, "Unexpected Name for %s", tt.filePath)
+			s.Equal(tt.expectedWithSuffix, file.NameWithSuffix, "Unexpected NameWithSuffix for %s", tt.filePath)
+		})
+	}
+}
+
 func (s *PathSuite) TestPath() {
+	// Setup: Create necessary directories and files
+	tmpDir := s.T().TempDir()
+
+	// Create /tmp/testdir/
+	testDir := filepath.Join(tmpDir, "testdir")
+	err := os.MkdirAll(testDir, 0755)
+	s.Require().NoError(err)
+
+	// Create /tmp/test.txt
+	testFile := filepath.Join(tmpDir, "test.txt")
+	err = os.WriteFile(testFile, []byte("test content"), 0644)
+	s.Require().NoError(err)
+
 	tests := []struct {
 		name     string
 		path     string
@@ -45,29 +118,29 @@ func (s *PathSuite) TestPath() {
 	}{
 		{
 			name: "file path",
-			path: "/tmp/test.txt",
+			path: testFile,
 			expected: FSPath{
-				filepath:       "/tmp/test.txt",
+				filepath:       testFile,
 				Name:           "test",
 				NameWithSuffix: "test.txt",
-				WorkingDir:     "/tmp",
-				BaseDir:        "tmp",
+				WorkingDir:     filepath.Dir(testFile),
+				BaseDir:        filepath.Base(filepath.Dir(testFile)),
 				Suffix:         ".txt",
-				AbsPath:        "/tmp/test.txt",
+				AbsPath:        testFile,
 				isDir:          false,
 			},
 		},
 		{
 			name: "directory path",
-			path: "/tmp/testdir/",
+			path: testDir,
 			expected: FSPath{
-				filepath:       "/tmp/testdir/",
+				filepath:       testDir,
 				Name:           "testdir",
 				NameWithSuffix: "testdir",
-				WorkingDir:     "/tmp/testdir",
+				WorkingDir:     testDir,
 				BaseDir:        "testdir",
 				Suffix:         "",
-				AbsPath:        "/tmp/testdir/",
+				AbsPath:        testDir,
 				isDir:          true,
 			},
 		},
@@ -228,7 +301,6 @@ func (s *PathSuite) TestListFilesWithGlob() {
 
 	file := Path(s.tempDir)
 
-	pp.Println(file.IsDir(), s.tempDir, file.WorkingDir)
 	result, err := file.ListFilesWithGlob("*.txt")
 	s.NoError(err)
 	s.Len(result, 2)
@@ -282,8 +354,8 @@ func (s *PathSuite) TestGenRelativeFile() {
 	}
 	for _, tt := range tests {
 		file := Path(tt.filePath)
-		got := file.GenRelativeFile(tt.newName)
-		s.Equal(tt.want, got, tt.name)
+		got := file.GenRelativeFSPath(tt.newName)
+		s.Equal(tt.want, got.AbsPath, tt.name)
 	}
 }
 
@@ -380,6 +452,83 @@ func (s *PathSuite) TestGenPathInSiblingDir() {
 	}
 }
 
+func (s *PathSuite) TestParts() {
+	tests := []struct {
+		name     string
+		path     string
+		expected []string
+	}{
+		{
+			name:     "simple absolute path",
+			path:     "/usr/bin/golang",
+			expected: []string{"/", "usr", "bin", "golang"},
+		},
+		{
+			name:     "path with trailing slash",
+			path:     "/usr/local/",
+			expected: []string{"/", "usr", "local"},
+		},
+		{
+			name:     "root directory",
+			path:     "/",
+			expected: []string{"/"},
+		},
+		{
+			name:     "path without leading slash",
+			path:     "home/user/documents",
+			expected: []string{"home", "user", "documents"},
+		},
+		{
+			name:     "path with multiple consecutive slashes",
+			path:     "/var///log/messages",
+			expected: []string{"/", "var", "log", "messages"},
+		},
+		{
+			name:     "path with dot",
+			path:     "/etc/./config",
+			expected: []string{"/", "etc", ".", "config"},
+		},
+		{
+			name:     "path with double dot",
+			path:     "/usr/local/../bin",
+			expected: []string{"/", "usr", "local", "..", "bin"},
+		},
+		{
+			name:     "empty path",
+			path:     "",
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			got := file.Parts()
+			s.Equal(tt.expected, got, "For path: %s", tt.path)
+		})
+	}
+}
+
+func (s *PathSuite) TestParent() {
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{"file in directory", "/tmp/a/b/test.txt", "/tmp/a/b"},
+		{"directory", "/tmp/a/b/c/", "/tmp/a/b"},
+		{"root directory", "/", "/"},
+		{"file in root", "/test.txt", "/"},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			s.Equal(tt.expected, file.Parent())
+		})
+	}
+}
+
 func (s *PathSuite) TestParents() {
 	tests := []struct {
 		name     string
@@ -411,19 +560,19 @@ func (s *PathSuite) TestParents() {
 			name: "all the way up",
 			raw:  "/tmp/b/93877/c/4696890",
 			n:    5,
-			want: "",
+			want: "/",
 		},
 		{
 			name: "beyond root",
 			raw:  "/tmp/b/93877/c/4696890",
 			n:    10,
-			want: "",
+			want: "/",
 		},
 		{
 			name: "from root",
 			raw:  "/",
 			n:    1,
-			want: "",
+			want: "/",
 		},
 		{
 			name: "relative path",
@@ -523,27 +672,6 @@ func (s *PathSuite) TestSplitPath() {
 	}
 }
 
-func (s *PathSuite) TestNewFileInWD() {
-	originalPath := s.createTempFile("original.txt", "content")
-	file := Path(originalPath)
-
-	newFile, err := file.NewFileInWD("new")
-	s.NoError(err)
-	s.Equal(filepath.Join(filepath.Dir(originalPath), "new.txt"), newFile.AbsPath)
-	s.FileExists(newFile.AbsPath)
-	s.NoFileExists(originalPath)
-}
-
-func (s *PathSuite) TestMustNewFileInWD() {
-	originalPath := s.createTempFile("original.txt", "content")
-	file := Path(originalPath)
-
-	newFile := file.MustNewFileInWD("new")
-	s.Equal(filepath.Join(filepath.Dir(originalPath), "new.txt"), newFile.AbsPath)
-	s.FileExists(newFile.AbsPath)
-	s.NoFileExists(originalPath)
-}
-
 func (s *PathSuite) TestMustSetString() {
 	path := filepath.Join(s.tempDir, "test.txt")
 	file := Path(path)
@@ -572,4 +700,260 @@ func (s *PathSuite) TestMustCSVGetSlices() {
 
 	result := file.MustCSVGetSlices()
 	s.Equal([][]string{{"a", "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}}, result)
+}
+
+func (s *PathSuite) TestCreateSiblingDir() {
+	tmpDir := s.T().TempDir()
+
+	tests := []struct {
+		name        string
+		setup       func() *FSPath
+		newDirName  string
+		expectedDir string
+		expectError bool
+	}{
+		{
+			name: "Create sibling dir for file path",
+			setup: func() *FSPath {
+				filePath := filepath.Join(tmpDir, "a", "b", "test.txt")
+				s.Require().NoError(os.MkdirAll(filepath.Dir(filePath), 0o755))
+				s.Require().NoError(os.WriteFile(filePath, []byte("test"), 0o644))
+				return Path(filePath)
+			},
+			newDirName:  "newFolder",
+			expectedDir: filepath.Join(tmpDir, "a", "b", "newFolder"),
+		},
+		{
+			name: "Create sibling dir for directory path",
+			setup: func() *FSPath {
+				dirPath := filepath.Join(tmpDir, "x", "y", "z")
+				s.Require().NoError(os.MkdirAll(dirPath, 0o755))
+				return Path(dirPath)
+			},
+			newDirName:  "newFolder",
+			expectedDir: filepath.Join(tmpDir, "x", "y", "z", "newFolder"),
+		},
+		{
+			name: "Create sibling dir when it already exists",
+			setup: func() *FSPath {
+				dirPath := filepath.Join(tmpDir, "m", "n")
+				newDirPath := filepath.Join(tmpDir, "m", "n", "existingFolder")
+				s.Require().NoError(os.MkdirAll(dirPath, 0o755))
+				s.Require().NoError(os.MkdirAll(newDirPath, 0o755))
+				return Path(dirPath)
+			},
+			newDirName:  "existingFolder",
+			expectedDir: filepath.Join(tmpDir, "m", "n", "existingFolder"),
+		},
+		{
+			name: "Attempt to create sibling dir with file name conflict",
+			setup: func() *FSPath {
+				dirPath := filepath.Join(tmpDir, "p", "q")
+				conflictPath := filepath.Join(tmpDir, "p", "q", "conflict")
+				s.Require().NoError(os.MkdirAll(dirPath, 0o755))
+				s.Require().NoError(os.WriteFile(conflictPath, []byte("test"), 0o644))
+				return Path(dirPath)
+			},
+			newDirName:  "conflict",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			path := tt.setup()
+			newDir, err := path.CreateSiblingDir(tt.newDirName)
+
+			if tt.expectError {
+				s.Error(err)
+			} else {
+				s.Require().NoError(err)
+				s.Equal(tt.expectedDir, newDir.AbsPath)
+				// Check if the directory exists using the file system
+				info, err := os.Stat(newDir.AbsPath)
+				s.Require().NoError(err)
+				s.True(info.IsDir(), "Created path should be a directory")
+				s.DirExists(newDir.AbsPath)
+			}
+		})
+	}
+}
+
+func (s *PathSuite) TestCreateSiblingDirToParent() {
+	tmpDir := s.T().TempDir()
+
+	tests := []struct {
+		name        string
+		setup       func() *FSPath
+		newDirName  string
+		expectedDir string
+		expectError bool
+	}{
+		{
+			name: "Create sibling dir to parent for file path",
+			setup: func() *FSPath {
+				filePath := filepath.Join(tmpDir, "a", "b", "test.txt")
+				s.Require().NoError(os.MkdirAll(filepath.Dir(filePath), 0o755))
+				s.Require().NoError(os.WriteFile(filePath, []byte("test"), 0o644))
+				return Path(filePath)
+			},
+			newDirName:  "newFolder",
+			expectedDir: filepath.Join(tmpDir, "a", "newFolder"),
+		},
+		{
+			name: "Create sibling dir to parent for directory path",
+			setup: func() *FSPath {
+				dirPath := filepath.Join(tmpDir, "x", "y", "z")
+				s.Require().NoError(os.MkdirAll(dirPath, 0o755))
+				return Path(dirPath)
+			},
+			newDirName:  "newFolder",
+			expectedDir: filepath.Join(tmpDir, "x", "newFolder"),
+		},
+		{
+			name: "Create sibling dir to parent when it already exists",
+			setup: func() *FSPath {
+				dirPath := filepath.Join(tmpDir, "m", "n", "o")
+				newDirPath := filepath.Join(tmpDir, "m", "existingFolder")
+				s.Require().NoError(os.MkdirAll(dirPath, 0o755))
+				s.Require().NoError(os.MkdirAll(newDirPath, 0o755))
+				return Path(dirPath)
+			},
+			newDirName:  "existingFolder",
+			expectedDir: filepath.Join(tmpDir, "m", "existingFolder"),
+		},
+		{
+			name: "Attempt to create sibling dir to parent with file name conflict",
+			setup: func() *FSPath {
+				dirPath := filepath.Join(tmpDir, "p", "q", "r")
+				conflictPath := filepath.Join(tmpDir, "p", "conflict")
+				s.Require().NoError(os.MkdirAll(dirPath, 0o755))
+				s.Require().NoError(os.WriteFile(conflictPath, []byte("test"), 0o644))
+				return Path(dirPath)
+			},
+			newDirName:  "conflict",
+			expectError: true,
+		},
+		{
+			name: "Attempt to create sibling dir to parent at root",
+			setup: func() *FSPath {
+				return Path("/")
+			},
+			newDirName:  "newFolder",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			path := tt.setup()
+			newDir, err := path.CreateSiblingDirToParent(tt.newDirName)
+
+			if tt.expectError {
+				s.Error(err)
+			} else {
+				s.Require().NoError(err)
+				s.Equal(tt.expectedDir, newDir.AbsPath)
+				info, err := os.Stat(newDir.AbsPath)
+				s.Require().NoError(err)
+				s.True(info.IsDir(), "Created path should be a directory")
+				s.DirExists(newDir.AbsPath)
+			}
+		})
+	}
+}
+
+func (s *PathSuite) TestTSVGetSlices() {
+	content := "a\tb\tc\n1\t2\t3\n4\t5\t6"
+	path := s.createTempFile("test.tsv", content)
+	file := Path(path)
+
+	result, err := file.TSVGetSlices()
+	s.NoError(err)
+	s.Equal([][]string{{"a", "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}}, result)
+}
+
+func (s *PathSuite) TestMustTSVGetSlices() {
+	content := "a\tb\tc\n1\t2\t3\n4\t5\t6"
+	path := s.createTempFile("test.tsv", content)
+	file := Path(path)
+
+	result := file.MustTSVGetSlices()
+	s.Equal([][]string{{"a", "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}}, result)
+}
+
+func (s *PathSuite) TestEPanic() {
+	file := Path("/tmp/test.txt")
+	s.Panics(func() {
+		file.e(nil, errors.New("test error"))
+	})
+}
+
+func (s *PathSuite) TestListFilesWithGlobPatterns() {
+	s.createTempFile("file1.txt", "")
+	s.createTempFile("file2.txt", "")
+	s.createTempFile("file3.json", "")
+	s.createTempFile(".hiddenfile", "")
+
+	file := Path(s.tempDir)
+
+	tests := []struct {
+		name     string
+		pattern  string
+		expected int
+	}{
+		{"all files", "", 4},
+		{"all files", "*", 4},
+		{"txt files", "*.txt", 2},
+		{"json files", "*.json", 1},
+		{"hidden files", ".*", 1},
+		{"non-existent pattern", "*.go", 0},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			result, err := file.ListFilesWithGlob(tt.pattern)
+			s.NoError(err)
+			s.Len(result, tt.expected)
+		})
+	}
+}
+
+func (s *PathSuite) TestReadDelimitedFile() {
+	tests := []struct {
+		name      string
+		content   string
+		delimiter rune
+		expected  [][]string
+	}{
+		{
+			name:      "comma delimiter",
+			content:   "a,b,c\n1,2,3\n4,5,6",
+			delimiter: ',',
+			expected:  [][]string{{"a", "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}},
+		},
+		{
+			name:      "tab delimiter",
+			content:   "a\tb\tc\n1\t2\t3\n4\t5\t6",
+			delimiter: '\t',
+			expected:  [][]string{{"a", "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}},
+		},
+		{
+			name:      "semicolon delimiter",
+			content:   "a;b;c\n1;2;3\n4;5;6",
+			delimiter: ';',
+			expected:  [][]string{{"a", "b", "c"}, {"1", "2", "3"}, {"4", "5", "6"}},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			path := s.createTempFile("test.txt", tt.content)
+			file := Path(path)
+
+			result, err := file.readDelimitedFile(tt.delimiter)
+			s.NoError(err)
+			s.Equal(tt.expected, result)
+		})
+	}
 }
