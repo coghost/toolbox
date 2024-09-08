@@ -45,80 +45,60 @@ func (s *PathSuite) createTempFile(name, content string) string {
 
 func (s *PathSuite) TestNameAndNameWithSuffix() {
 	tests := []struct {
-		name               string
-		filePath           string
-		expectedName       string
-		expectedWithSuffix string
+		name         string
+		filePath     string
+		expectedStem string
+		expectedName string
 	}{
 		{
-			name:               "simple file",
-			filePath:           "/tmp/test.txt",
-			expectedName:       "test",
-			expectedWithSuffix: "test.txt",
+			name:         "simple file",
+			filePath:     "/tmp/test.txt",
+			expectedStem: "test",
+			expectedName: "test.txt",
 		},
 		{
-			name:               "file with multiple extensions",
-			filePath:           "/home/user/document.tar.gz",
-			expectedName:       "document.tar",
-			expectedWithSuffix: "document.tar.gz",
+			name:         "file with multiple extensions",
+			filePath:     "/home/user/document.tar.gz",
+			expectedStem: "document.tar",
+			expectedName: "document.tar.gz",
 		},
 		{
-			name:               "hidden file",
-			filePath:           "/home/user/.config",
-			expectedName:       "",
-			expectedWithSuffix: ".config",
+			name:         "hidden file",
+			filePath:     "/home/user/.config",
+			expectedStem: "",
+			expectedName: ".config",
 		},
 		{
-			name:               "directory",
-			filePath:           "/var/log/",
-			expectedName:       "log",
-			expectedWithSuffix: "log",
+			name:         "directory",
+			filePath:     "/var/log/",
+			expectedStem: "log",
+			expectedName: "log",
 		},
 		{
-			name:               "file without extension",
-			filePath:           "/bin/bash",
-			expectedName:       "bash",
-			expectedWithSuffix: "bash",
+			name:         "file without extension",
+			filePath:     "/bin/bash",
+			expectedStem: "bash",
+			expectedName: "bash",
 		},
 		{
-			name:               "root directory",
-			filePath:           "/",
-			expectedName:       "/",
-			expectedWithSuffix: "/",
+			name:         "root directory",
+			filePath:     "/",
+			expectedStem: "/",
+			expectedName: "/",
 		},
 		{
-			name:               "file with dot in name",
-			filePath:           "/home/user/file.name.with.dots.txt",
-			expectedName:       "file.name.with.dots",
-			expectedWithSuffix: "file.name.with.dots.txt",
+			name:         "file with dot in name",
+			filePath:     "/home/user/file.name.with.dots.txt",
+			expectedStem: "file.name.with.dots",
+			expectedName: "file.name.with.dots.txt",
 		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
-			s.Equal(tt.expectedName, file.Stem, "Unexpected Name for %s", tt.filePath)
-			s.Equal(tt.expectedWithSuffix, file.Name, "Unexpected NameWithSuffix for %s", tt.filePath)
-		})
-	}
-}
-
-func (s *PathSuite) TestWorkingDir() {
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{"file in directory", "/tmp/a/b/test.txt", "/tmp/a/b"},
-		{"directory", "/tmp/a/b/c/", "/tmp/a/b/c"},
-		{"root file", "/test.txt", "/"},
-		{"root directory", "/", "/"},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			file := Path(tt.path)
-			s.Equal(tt.expected, file.WorkingDir)
+			s.Equal(tt.expectedStem, file.Stem, "Unexpected Stem for %s", tt.filePath)
+			s.Equal(tt.expectedName, file.Name, "Unexpected Name for %s", tt.filePath)
 		})
 	}
 }
@@ -171,7 +151,12 @@ func (s *PathSuite) TestAbsPath() {
 			}()
 
 			file := Path(tt.path)
-			s.Equal(tt.expected, file.AbsPath)
+
+			// Remove "/private" prefix from both expected and actual paths
+			expectedPath := strings.TrimPrefix(tt.expected, "/private")
+			actualPath := strings.TrimPrefix(file.AbsPath, "/private")
+
+			s.Equal(expectedPath, actualPath)
 		})
 	}
 }
@@ -199,14 +184,11 @@ func (s *PathSuite) TestPath() {
 			name: "file path",
 			path: testFile,
 			expected: FSPath{
-				filepath:   testFile,
-				Stem:       "test",
-				Name:       "test.txt",
-				WorkingDir: filepath.Dir(testFile),
-				BaseDir:    filepath.Base(filepath.Dir(testFile)),
-				Suffix:     ".txt",
-				AbsPath:    testFile,
-				isDir:      false,
+				RawPath: testFile,
+				Stem:    "test",
+				Name:    "test.txt",
+				Suffix:  ".txt",
+				AbsPath: testFile,
 				// Note: We don't compare the 'fs' field directly
 			},
 		},
@@ -214,14 +196,11 @@ func (s *PathSuite) TestPath() {
 			name: "directory path",
 			path: testDir,
 			expected: FSPath{
-				filepath:   testDir,
-				Stem:       "testdir",
-				Name:       "testdir",
-				WorkingDir: testDir,
-				BaseDir:    "testdir",
-				Suffix:     "",
-				AbsPath:    testDir,
-				isDir:      true,
+				RawPath: testDir,
+				Stem:    "testdir",
+				Name:    "testdir",
+				Suffix:  "",
+				AbsPath: testDir,
 				// Note: We don't compare the 'fs' field directly
 			},
 		},
@@ -232,14 +211,11 @@ func (s *PathSuite) TestPath() {
 			result := Path(tt.path)
 
 			// Compare fields individually, excluding 'fs'
-			s.Equal(tt.expected.filepath, result.filepath)
+			s.Equal(tt.expected.RawPath, result.RawPath)
 			s.Equal(tt.expected.Stem, result.Stem)
 			s.Equal(tt.expected.Name, result.Name)
-			s.Equal(tt.expected.WorkingDir, result.WorkingDir)
-			s.Equal(tt.expected.BaseDir, result.BaseDir)
 			s.Equal(tt.expected.Suffix, result.Suffix)
 			s.Equal(tt.expected.AbsPath, result.AbsPath)
-			s.Equal(tt.expected.isDir, result.isDir)
 
 			// Check that 'fs' is not nil and is of the expected type
 			s.NotNil(result.fs)
@@ -247,16 +223,6 @@ func (s *PathSuite) TestPath() {
 			s.True(ok, "Expected fs to be of type *afero.OsFs")
 		})
 	}
-}
-
-func (s *PathSuite) TestPathWithFs() {
-	memFs := afero.NewMemMapFs()
-	path := "/test/file.txt"
-	fspath := PathWithFs(path, memFs)
-
-	s.Equal(path, fspath.filepath)
-	s.NotNil(fspath.fs)
-	s.IsType(&afero.MemMapFs{}, fspath.fs)
 }
 
 func (s *PathSuite) TestStat() {
@@ -471,151 +437,84 @@ func (s *PathSuite) TestListFilesWithGlobStatic() {
 	s.ElementsMatch([]string{"file1.txt", "file2.txt"}, fileNames)
 }
 
-func (s *PathSuite) TestGenRelativeFile() {
-	tests := []struct {
-		name     string
-		filePath string
-		newName  string
-		want     string
-	}{
-		{
-			name:     "in current folder with src file",
-			filePath: "/tmp/b/93877/c/4696890.html",
-			newName:  "./abc.json",
-			want:     "/tmp/b/93877/c/abc.json",
-		},
-		{
-			name:     "in current folder with src folder",
-			filePath: "/tmp/b/93877/c/4696890/",
-			newName:  "./abc.json",
-			want:     "/tmp/b/93877/c/4696890/abc.json",
-		},
-		{
-			name:     "in parent folder with src file",
-			filePath: "/tmp/b/93877/c/4696890.html",
-			newName:  "../abc.json",
-			want:     "/tmp/b/93877/abc.json",
-		},
-		{
-			name:     "in parent folder with src folder",
-			filePath: "/tmp/b/93877/c/4696890/",
-			newName:  "../abc.json",
-			want:     "/tmp/b/93877/c/abc.json",
-		},
-		{
-			name:     "in /tmp folder",
-			filePath: "/tmp/b/",
-			newName:  "../abc.json",
-			want:     "/tmp/abc.json",
-		},
-		{
-			name:     "in /tmp folder",
-			filePath: "/tmp/",
-			newName:  "../../abc.json",
-			want:     "/abc.json",
-		},
-	}
-	for _, tt := range tests {
-		file := Path(tt.filePath)
-		got := file.GenRelativeFSPath(tt.newName)
-		s.Equal(tt.want, got.AbsPath, tt.name)
-	}
-}
-
-func (s *PathSuite) TestGenFileWithType() {
+func (s *PathSuite) TestWithSuffixInNewDir() {
 	tests := []struct {
 		name      string
 		filePath  string
-		newType   string
-		newFolder bool
+		newSuffix string
 		want      string
 	}{
 		{
-			name:     "in current folder",
-			filePath: "/tmp/a/b/c.txt",
-			newType:  "json",
-			want:     "/tmp/a/b/c.json",
+			name:      "file in subdirectory",
+			filePath:  "/tmp/a/b/file.txt",
+			newSuffix: "json",
+			want:      "/tmp/a/b_json/file.json",
 		},
 		{
-			name:      "in parent folder",
-			filePath:  "/tmp/a/b/c.txt",
-			newType:   "json",
-			newFolder: true,
-			want:      "/tmp/a/b_json/c.json",
+			name:      "file in root directory",
+			filePath:  "/file.txt",
+			newSuffix: "json",
+			want:      "/_json/file.json",
 		},
 		{
-			name:      "in top-level folder",
-			filePath:  "/tmp/c.txt",
-			newType:   "json",
-			newFolder: true,
-			want:      "/tmp/_json/c.json",
+			name:      "directory path",
+			filePath:  "/tmp/a/b/",
+			newSuffix: "backup",
+			want:      "/tmp/a_backup/b.backup",
 		},
 		{
-			name:      "in top-level folder",
-			filePath:  "/tmp/c.txt",
-			newType:   "yaml",
-			newFolder: true,
-			want:      "/tmp/_yaml/c.yaml",
-		},
-	}
-
-	for _, tt := range tests {
-		file := Path(tt.filePath)
-		got := file.GenFilePathWithNewSuffix(tt.newType, tt.newFolder)
-		s.Equal(tt.want, got.filepath, tt.name)
-	}
-}
-
-func (s *PathSuite) TestGenPathInSiblingDir() {
-	tests := []struct {
-		name       string
-		filePath   string
-		folderName string
-		want       string
-	}{
-		{
-			name:       "file in subdirectory",
-			filePath:   "/tmp/a/b/c.txt",
-			folderName: "new_folder",
-			want:       "/tmp/a/new_folder/c.txt",
+			name:      "file without extension",
+			filePath:  "/tmp/a/b/file",
+			newSuffix: "txt",
+			want:      "/tmp/a/b_txt/file.txt",
 		},
 		{
-			name:       "file in root directory",
-			filePath:   "/tmp/c.txt",
-			folderName: "new_folder",
-			want:       "/new_folder/c.txt",
+			name:      "file with multiple extensions",
+			filePath:  "/tmp/a/b/archive.tar.gz",
+			newSuffix: "bak",
+			want:      "/tmp/a/b_bak/archive.tar.bak",
 		},
 		{
-			name:       "directory path",
-			filePath:   "/tmp/a/b/c/",
-			folderName: "new_folder",
-			want:       "/tmp/a/b/new_folder/c",
+			name:      "empty new suffix",
+			filePath:  "/tmp/a/b/file.txt",
+			newSuffix: "",
+			want:      "/tmp/a/b_/file",
 		},
 		{
-			name:       "file with no extension",
-			filePath:   "/tmp/a/b/c",
-			folderName: "new_folder",
-			want:       "/tmp/a/new_folder/c",
-		},
-		{
-			name:       "folder name with spaces",
-			filePath:   "/tmp/a/b/c.txt",
-			folderName: "new folder",
-			want:       "/tmp/a/new folder/c.txt",
+			name:      "suffix with dot",
+			filePath:  "/tmp/a/b/file.txt",
+			newSuffix: ".json",
+			want:      "/tmp/a/b_json/file.json",
 		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
-			got := file.GenPathInSiblingDir(tt.folderName)
-			s.Equal(tt.want, got.AbsPath, tt.name)
-			s.Equal(filepath.Base(tt.want), got.Name, tt.name)
+			got := file.WithSuffixAndSuffixedParentDir(tt.newSuffix)
+			s.Equal(tt.want, got.AbsPath, "For input: %s", tt.filePath)
+
+			// Additional checks
+			s.Equal(filepath.Base(tt.want), got.Name)
+			s.Equal(filepath.Dir(tt.want), got.Parent().AbsPath)
+
+			// Check that the original path hasn't changed
+			s.NotEqual(got.AbsPath, file.AbsPath, "Original path should not be modified")
+
+			// Check that the new file has the correct suffix
+			if tt.newSuffix != "" {
+				s.Equal("."+strings.TrimPrefix(tt.newSuffix, "."), filepath.Ext(got.Name))
+			} else {
+				s.Equal("", filepath.Ext(got.Name))
+			}
 		})
 	}
 }
 
 func (s *PathSuite) TestParts() {
+	currentDir, err := os.Getwd()
+	s.Require().NoError(err)
+
 	tests := []struct {
 		name     string
 		path     string
@@ -636,37 +535,38 @@ func (s *PathSuite) TestParts() {
 			path:     "/",
 			expected: []string{"/"},
 		},
-		// {
-		// 	name:     "path without leading slash",
-		// 	path:     "home/user/documents",
-		// 	expected: []string{"home", "user", "documents"},
-		// },
+		{
+			name:     "path without leading slash",
+			path:     "home/user/documents",
+			expected: append([]string{"/"}, strings.Split(filepath.Join(currentDir, "home", "user", "documents"), string(os.PathSeparator))[1:]...),
+		},
 		{
 			name:     "path with multiple consecutive slashes",
 			path:     "/var///log/messages",
 			expected: []string{"/", "var", "log", "messages"},
 		},
-		// {
-		// 	name:     "path with dot",
-		// 	path:     "/etc/./config",
-		// 	expected: []string{"/", "etc", ".", "config"},
-		// },
-		// {
-		// 	name:     "path with double dot",
-		// 	path:     "/usr/local/../bin",
-		// 	expected: []string{"/", "usr", "local", "..", "bin"},
-		// },
-		// {
-		// 	name:     "empty path",
-		// 	path:     "",
-		// 	expected: []string{},
-		// },
+		{
+			name:     "path with dot",
+			path:     "/etc/./config",
+			expected: []string{"/", "etc", "config"},
+		},
+		{
+			name:     "path with double dot",
+			path:     "/usr/local/../bin",
+			expected: []string{"/", "usr", "bin"},
+		},
+		{
+			name:     "empty path",
+			path:     "",
+			expected: append([]string{"/"}, strings.Split(currentDir, string(os.PathSeparator))[1:]...),
+		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
 			got := file.Parts()
+
 			s.Equal(tt.expected, got, "For path: %s", tt.path)
 		})
 	}
@@ -687,25 +587,26 @@ func (s *PathSuite) TestParent() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
-			s.Equal(tt.expected, file.Parent())
+			s.Equal(tt.expected, file.Parent().AbsPath)
 		})
 	}
 }
 
 func (s *PathSuite) TestParents() {
+	currentDir, err := os.Getwd()
+	s.Require().NoError(err)
+
 	tests := []struct {
-		name     string
-		raw      string
-		n        int
-		want     string
-		wantSame bool
+		name string
+		raw  string
+		n    int
+		want string
 	}{
 		{
-			name:     "zero levels up",
-			raw:      "/tmp/b/93877/c/4696890",
-			n:        0,
-			want:     "/tmp/b/93877/c/4696890",
-			wantSame: true,
+			name: "zero levels up",
+			raw:  "/tmp/b/93877/c/4696890",
+			n:    0,
+			want: "/tmp/b/93877/c/4696890",
 		},
 		{
 			name: "one level up",
@@ -737,12 +638,12 @@ func (s *PathSuite) TestParents() {
 			n:    1,
 			want: "/",
 		},
-		// {
-		// 	name: "relative path",
-		// 	raw:  "documents/subdirectory/file.txt",
-		// 	n:    2,
-		// 	want: "documents",
-		// },
+		{
+			name: "relative path",
+			raw:  "documents/subdirectory/file.txt",
+			n:    2,
+			want: filepath.Join(currentDir, "documents"),
+		},
 		{
 			name: "with trailing slash",
 			raw:  "/tmp/b/93877/c/4696890/",
@@ -756,10 +657,13 @@ func (s *PathSuite) TestParents() {
 			file := Path(tt.raw)
 			got := file.Parents(tt.n)
 
-			if tt.wantSame {
-				s.Equal(file.AbsPath, got, "Path should remain the same for n=0")
+			if filepath.IsAbs(tt.raw) {
+				s.Equal(tt.want, got.AbsPath, "Unexpected parent path")
 			} else {
-				s.Equal(tt.want, got, "Unexpected parent path")
+				// For relative paths, we need to compare with the resolved absolute path
+				expectedAbs, err := filepath.Abs(tt.want)
+				s.Require().NoError(err)
+				s.Equal(expectedAbs, got.AbsPath, "Unexpected parent path")
 			}
 		})
 	}
@@ -786,12 +690,17 @@ func (s *PathSuite) TestBaseDir() {
 			filePath: "/tmp/c.txt",
 			wantBase: "tmp",
 		},
+		{
+			name:     "root directory",
+			filePath: "/",
+			wantBase: "/",
+		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
-			s.Equal(tt.wantBase, file.BaseDir, "Unexpected BaseDir")
+			s.Equal(tt.wantBase, file.BaseDir(), "Unexpected BaseDir")
 		})
 	}
 }
@@ -808,7 +717,7 @@ func (s *PathSuite) TestOriginalName() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
-			s.Equal(tt.filePath, file.OriginalName())
+			s.Equal(tt.filePath, file.RawPath)
 		})
 	}
 }
@@ -828,7 +737,7 @@ func (s *PathSuite) TestSplitPath() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
-			dir, name := file.SplitPath(tt.filePath)
+			dir, name := file.Split(tt.filePath)
 			s.Equal(tt.wantDir, dir)
 			s.Equal(tt.wantName, name)
 		})
@@ -894,167 +803,6 @@ func (s *PathSuite) TestCSVAndTSVWithComments() {
 	s.Equal(expectedResult, tsvResult)
 }
 
-func (s *PathSuite) TestCreateSiblingDir() {
-	tmpDir := s.T().TempDir()
-
-	tests := []struct {
-		name        string
-		setup       func() *FSPath
-		newDirName  string
-		expectedDir string
-		expectError bool
-	}{
-		{
-			name: "Create sibling dir for file path",
-			setup: func() *FSPath {
-				filePath := filepath.Join(tmpDir, "a", "b", "test.txt")
-				s.Require().NoError(os.MkdirAll(filepath.Dir(filePath), _mode755))
-				s.Require().NoError(os.WriteFile(filePath, []byte("test"), _mode644))
-				return Path(filePath)
-			},
-			newDirName:  "newFolder",
-			expectedDir: filepath.Join(tmpDir, "a", "b", "newFolder"),
-		},
-		{
-			name: "Create sibling dir for directory path",
-			setup: func() *FSPath {
-				dirPath := filepath.Join(tmpDir, "x", "y", "z")
-				s.Require().NoError(os.MkdirAll(dirPath, _mode755))
-				return Path(dirPath)
-			},
-			newDirName:  "newFolder",
-			expectedDir: filepath.Join(tmpDir, "x", "y", "z", "newFolder"),
-		},
-		{
-			name: "Create sibling dir when it already exists",
-			setup: func() *FSPath {
-				dirPath := filepath.Join(tmpDir, "m", "n")
-				newDirPath := filepath.Join(tmpDir, "m", "n", "existingFolder")
-				s.Require().NoError(os.MkdirAll(dirPath, _mode755))
-				s.Require().NoError(os.MkdirAll(newDirPath, _mode755))
-				return Path(dirPath)
-			},
-			newDirName:  "existingFolder",
-			expectedDir: filepath.Join(tmpDir, "m", "n", "existingFolder"),
-		},
-		{
-			name: "Attempt to create sibling dir with file name conflict",
-			setup: func() *FSPath {
-				dirPath := filepath.Join(tmpDir, "p", "q")
-				conflictPath := filepath.Join(tmpDir, "p", "q", "conflict")
-				s.Require().NoError(os.MkdirAll(dirPath, _mode755))
-				s.Require().NoError(os.WriteFile(conflictPath, []byte("test"), _mode644))
-				return Path(dirPath)
-			},
-			newDirName:  "conflict",
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			path := tt.setup()
-			newDir, err := path.CreateSiblingDir(tt.newDirName)
-
-			if tt.expectError {
-				s.Error(err)
-			} else {
-				s.Require().NoError(err)
-				s.Equal(tt.expectedDir, newDir.AbsPath)
-				// Check if the directory exists using the file system
-				info, err := os.Stat(newDir.AbsPath)
-				s.Require().NoError(err)
-				s.True(info.IsDir(), "Created path should be a directory")
-				s.DirExists(newDir.AbsPath)
-			}
-		})
-	}
-}
-
-func (s *PathSuite) TestCreateSiblingDirToParent() {
-	tmpDir := s.T().TempDir()
-
-	tests := []struct {
-		name        string
-		setup       func() *FSPath
-		newDirName  string
-		expectedDir string
-		expectError bool
-	}{
-		{
-			name: "Create sibling dir to parent for file path",
-			setup: func() *FSPath {
-				filePath := filepath.Join(tmpDir, "a", "b", "test.txt")
-				s.Require().NoError(os.MkdirAll(filepath.Dir(filePath), _mode755))
-				s.Require().NoError(os.WriteFile(filePath, []byte("test"), _mode644))
-				return Path(filePath)
-			},
-			newDirName:  "newFolder",
-			expectedDir: filepath.Join(tmpDir, "a", "newFolder"),
-		},
-		{
-			name: "Create sibling dir to parent for directory path",
-			setup: func() *FSPath {
-				dirPath := filepath.Join(tmpDir, "x", "y", "z")
-				s.Require().NoError(os.MkdirAll(dirPath, _mode755))
-				return Path(dirPath)
-			},
-			newDirName:  "newFolder",
-			expectedDir: filepath.Join(tmpDir, "x", "newFolder"),
-		},
-		{
-			name: "Create sibling dir to parent when it already exists",
-			setup: func() *FSPath {
-				dirPath := filepath.Join(tmpDir, "m", "n", "o")
-				newDirPath := filepath.Join(tmpDir, "m", "existingFolder")
-				s.Require().NoError(os.MkdirAll(dirPath, _mode755))
-				s.Require().NoError(os.MkdirAll(newDirPath, _mode755))
-				return Path(dirPath)
-			},
-			newDirName:  "existingFolder",
-			expectedDir: filepath.Join(tmpDir, "m", "existingFolder"),
-		},
-		{
-			name: "Attempt to create sibling dir to parent with file name conflict",
-			setup: func() *FSPath {
-				dirPath := filepath.Join(tmpDir, "p", "q", "r")
-				conflictPath := filepath.Join(tmpDir, "p", "conflict")
-				s.Require().NoError(os.MkdirAll(dirPath, _mode755))
-				s.Require().NoError(os.WriteFile(conflictPath, []byte("test"), _mode644))
-				return Path(dirPath)
-			},
-			newDirName:  "conflict",
-			expectError: true,
-		},
-		{
-			name: "Attempt to create sibling dir to parent at root",
-			setup: func() *FSPath {
-				return Path("/")
-			},
-			newDirName:  "newFolder",
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			path := tt.setup()
-			newDir, err := path.CreateSiblingDirToParent(tt.newDirName)
-
-			if tt.expectError {
-				s.Error(err)
-			} else {
-				s.Require().NoError(err)
-				s.Equal(tt.expectedDir, newDir.AbsPath)
-				info, err := os.Stat(newDir.AbsPath)
-				s.Require().NoError(err)
-				s.True(info.IsDir(), "Created path should be a directory")
-				s.DirExists(newDir.AbsPath)
-			}
-		})
-	}
-}
-
 func (s *PathSuite) TestListFilesWithGlobPatterns() {
 	s.createTempFile("file1.txt", "")
 	s.createTempFile("file2.txt", "")
@@ -1084,6 +832,7 @@ func (s *PathSuite) TestListFilesWithGlobPatterns() {
 		})
 	}
 }
+
 func (s *PathSuite) TestTSVGetSlices() {
 	content := "a\tb\tc\n1\t2\t3\n4\t5\t6"
 	path := s.createTempFile("test.tsv", content)
@@ -1171,4 +920,236 @@ func (s *PathSuite) TestMustMethodsPanic() {
 	s.Panics(func() { fspath.MustGetBytes() })
 	s.Panics(func() { fspath.MustCSVGetSlices() })
 	s.Panics(func() { fspath.MustTSVGetSlices() })
+}
+
+func (s *PathSuite) TestWithName() {
+	tmpDir := s.T().TempDir()
+
+	tests := []struct {
+		name     string
+		path     string
+		newName  string
+		expected string
+	}{
+		{"change file name", "/home/user/file.txt", "newfile.txt", "/home/user/newfile.txt"},
+		{"change directory name", "/home/user/docs/", "newdocs", "/home/user/newdocs"},
+		{"change root-level file name", "/file.txt", "newfile.txt", "/newfile.txt"},
+		{"change to name with extension", "/home/user/file.txt", "newfile.csv", "/home/user/newfile.csv"},
+		{"change to name without extension", "/home/user/file.txt", "newfile", "/home/user/newfile"},
+		{"change root-level file name", "/", "newfile.txt", "/newfile.txt"},
+		{"sibling", "/tmp/a/b/current.txt", "newFolder/abc.txt", "/tmp/a/b/newFolder/abc.txt"},
+		{
+			name:     "create sibling dir for file path",
+			path:     filepath.Join(tmpDir, "a", "b", "test.txt"),
+			newName:  "newFolder",
+			expected: filepath.Join(tmpDir, "a", "b", "newFolder"),
+		},
+		{
+			name:     "create sibling dir for directory path",
+			path:     filepath.Join(tmpDir, "x", "y", "z"),
+			newName:  "newFolder",
+			expected: filepath.Join(tmpDir, "x", "y", "newFolder"),
+		},
+		{
+			name:     "create new dir at root",
+			path:     "/",
+			newName:  "newFolder",
+			expected: "/newFolder",
+		},
+		{
+			name:     "change name of hidden file",
+			path:     "/home/user/.config",
+			newName:  ".newconfig",
+			expected: "/home/user/.newconfig",
+		},
+		{
+			name:     "change name with spaces",
+			path:     "/home/user/my documents",
+			newName:  "my new documents",
+			expected: "/home/user/my new documents",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			newFile := file.WithName(tt.newName)
+			s.Equal(tt.expected, newFile.AbsPath)
+
+			// Additional checks
+			s.Equal(filepath.Base(tt.expected), newFile.Name)
+			s.Equal(filepath.Dir(tt.expected), newFile.Parent().AbsPath)
+
+			// Check that the original path hasn't changed
+			s.NotEqual(newFile.AbsPath, file.AbsPath, "Original path should not be modified")
+		})
+	}
+}
+
+func (s *PathSuite) TestJoinPath() {
+	tests := []struct {
+		name     string
+		path     string
+		others   []string
+		expected string
+	}{
+		{
+			name:     "join relative path to file",
+			path:     "/home/user/file.html",
+			others:   []string{"..", "newfile.txt"},
+			expected: "/home/user/newfile.txt",
+		},
+		{
+			name:     "join multiple components to directory",
+			path:     "/home/user/",
+			others:   []string{"documents", "file.txt"},
+			expected: "/home/user/documents/file.txt",
+		},
+		{
+			name:     "join to file as if it were a directory",
+			path:     "/home/user/file.txt",
+			others:   []string{"documents", "newfile.txt"},
+			expected: "/home/user/file.txt/documents/newfile.txt",
+		},
+		{
+			name:     "join to root directory",
+			path:     "/",
+			others:   []string{"var", "log"},
+			expected: "/var/log",
+		},
+		{
+			name:     "join with empty component",
+			path:     "/home/user/",
+			others:   []string{"", "documents"},
+			expected: "/home/user/documents",
+		},
+		{
+			name:     "join absolute path overrides base path",
+			path:     "/home/user/",
+			others:   []string{"/var/log"},
+			expected: "/var/log",
+		},
+		{
+			name:     "join with parent directory reference",
+			path:     "/home/user/",
+			others:   []string{"..", "documents"},
+			expected: "/home/documents",
+		},
+		{
+			name:     "join to file with parent directory reference",
+			path:     "/home/user/file.txt",
+			others:   []string{"..", "documents"},
+			expected: "/home/user/documents",
+		},
+		{
+			name:     "join to root-level file",
+			path:     "/file.txt",
+			others:   []string{"documents", "newfile.txt"},
+			expected: "/file.txt/documents/newfile.txt",
+		},
+		{
+			name:     "join to root-level file with parent reference",
+			path:     "/file.txt",
+			others:   []string{"..", "documents", "newfile.txt"},
+			expected: "/documents/newfile.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			result := file.JoinPath(tt.others...)
+			s.Equal(tt.expected, result.AbsPath)
+		})
+	}
+}
+
+func (s *PathSuite) TestWithStem() {
+	tests := []struct {
+		name     string
+		path     string
+		newStem  string
+		expected string
+	}{
+		{"change file stem", "/home/user/file.txt", "newfile", "/home/user/newfile.txt"},
+		{"change directory stem", "/home/user/docs/", "newdocs", "/home/user/newdocs"},
+		{"change stem of file without extension", "/home/user/file", "newfile", "/home/user/newfile"},
+		{"change stem of file with multiple extensions", "/home/user/archive.tar.gz", "newarchive", "/home/user/newarchive.gz"},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			newFile := file.WithStem(tt.newStem)
+			s.Equal(tt.expected, newFile.AbsPath)
+		})
+	}
+}
+
+func (s *PathSuite) TestWithSuffix() {
+	tests := []struct {
+		name      string
+		path      string
+		newSuffix string
+		expected  string
+	}{
+		{"change file suffix", "/home/user/file.txt", ".md", "/home/user/file.md"},
+		{"add suffix to directory", "/home/user/docs/", ".txt", "/home/user/docs.txt"},
+		{"remove suffix", "/home/user/file.txt", "", "/home/user/file"},
+		{"change suffix of file without extension", "/home/user/file", ".txt", "/home/user/file.txt"},
+		{"change suffix without dot", "/home/user/file.txt", "md", "/home/user/file.md"},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			newFile := file.WithSuffix(tt.newSuffix)
+			s.Equal(tt.expected, newFile.AbsPath)
+		})
+	}
+}
+
+func (s *PathSuite) TestWithRenamedParentDir() {
+	tests := []struct {
+		name       string
+		filePath   string
+		newDirName string
+		want       string
+	}{
+		{
+			name:       "file in subdirectory",
+			filePath:   "/tmp/a/b/file.txt",
+			newDirName: "c",
+			want:       "/tmp/a/c/file.txt",
+		},
+		{
+			name:       "directory path",
+			filePath:   "/tmp/a/b/",
+			newDirName: "c",
+			want:       "/tmp/c/b",
+		},
+		{
+			name:       "file in root directory",
+			filePath:   "/file.txt",
+			newDirName: "newdir",
+			want:       "/newdir/file.txt",
+		},
+		{
+			name:       "root directory",
+			filePath:   "/",
+			newDirName: "newdir",
+			want:       "/",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.filePath)
+			got := file.WithRenamedParentDir(tt.newDirName)
+			s.Equal(tt.want, got.AbsPath)
+		})
+	}
+}
+
+func (s *PathSuite) Test00Manual() {
 }

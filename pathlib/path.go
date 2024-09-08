@@ -3,11 +3,9 @@ package pathlib
 import (
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -52,32 +50,6 @@ type FSPath struct {
 	// or when you need to distinguish between files with the same base name but different extensions.
 	Name string
 
-	// WorkingDir represents the absolute path of the working directory associated with this FSPath.
-	// For files, it's the directory containing the file. For directories, it's the directory path itself.
-	// It does not include a trailing slash.
-	//
-	// This field is useful for operations that need to work relative to the file's location,
-	// such as creating new files in the same directory or performing glob operations.
-	//
-	// Examples:
-	//   - For a file "/tmp/folder/file.txt", WorkingDir would be "/tmp/folder"
-	//   - For a directory "/tmp/folder/", WorkingDir would be "/tmp/folder"
-	WorkingDir string
-
-	// BaseDir represents the name of the immediate parent directory of the file or directory.
-	// For files or directories not at the root, it's the name of the containing folder.
-	// For items at the root level, it will be the name of the root directory.
-	//
-	// Examples:
-	//   - For a file "/tmp/folder/subfolder/file.txt", BaseDir would be "subfolder"
-	//   - For a directory "/tmp/folder/subfolder/", BaseDir would be "folder"
-	//   - For a file "/tmp/file.txt", BaseDir would be "tmp"
-	//   - For the root directory "/", BaseDir would be ""
-	//
-	// This field is useful for operations that need to know or work with the immediate
-	// parent directory name without dealing with the full path.
-	BaseDir string
-
 	// Suffix represents the file extension, including the leading dot.
 	// For files without an extension or for directories, it will be an empty string.
 	//
@@ -103,8 +75,7 @@ type FSPath struct {
 	// It resolves any relative paths to their absolute form.
 	AbsPath string
 
-	filepath string
-	isDir    bool
+	RawPath string
 
 	fs afero.Fs // The underlying file system
 }
@@ -112,81 +83,27 @@ type FSPath struct {
 // Path creates and returns a new Entity from the given file path
 func Path(filePath string) *FSPath {
 	fs := afero.NewOsFs()
-	isDir := strings.HasSuffix(filePath, "/")
 
-	absPath := getAbsPath(filePath)
-	nameWithSuffix := filepath.Base(filePath)
+	absPath := resolveAbsPath(filePath)
+	name := filepath.Base(filePath)
 	suffix := filepath.Ext(filePath)
-	name := strings.TrimSuffix(nameWithSuffix, suffix)
-
-	if !isDir {
-		isDir, _ = afero.IsDir(fs, absPath)
-	}
-
-	working := determineWorkingDir(absPath, isDir)
+	stem := strings.TrimSuffix(name, suffix)
 
 	pth := &FSPath{
-		AbsPath:    absPath,
-		BaseDir:    filepath.Base(working),
-		WorkingDir: working,
-
-		Stem:   name,
-		Name:   nameWithSuffix,
-		Suffix: suffix,
-
-		filepath: filePath,
-		isDir:    isDir,
-
-		fs: fs, // Use OS file system by default
+		AbsPath: absPath,
+		Stem:    stem,
+		Name:    name,
+		Suffix:  suffix,
+		RawPath: filePath,
+		// Use OS file system by default
+		fs: fs,
 	}
 
 	return pth
 }
 
-// PathWithFs creates a new FSPath with a custom afero.Fs
-func PathWithFs(filePath string, fs afero.Fs) *FSPath {
-	pth := Path(filePath)
-	pth.fs = fs
-
-	return pth
-}
-
-// New function to handle absolute path logic
-func getAbsPath(filePath string) string {
-	// Expand the path first
-	expandedPath := Expand(filePath)
-
-	// Convert to absolute path without resolving symlinks
-	absPath, err := filepath.Abs(expandedPath)
-	if err != nil {
-		// If we can't get the absolute path, use the expanded path
-		return expandedPath
-	}
-
-	// Preserve /var/folders/ prefix if it exists
-	if strings.HasPrefix(absPath, "/private/var/folders/") {
-		return strings.TrimPrefix(absPath, "/private")
-	}
-
-	return absPath
-}
-
-// New function to handle working directory logic
-func determineWorkingDir(absPath string, isDir bool) string {
-	var working string
-
-	if isDir {
-		working = absPath
-	} else {
-		working = filepath.Dir(absPath)
-	}
-
-	// Handle root directory case
-	if working == string(os.PathSeparator) {
-		return string(os.PathSeparator)
-	}
-
-	return strings.TrimSuffix(working, string(os.PathSeparator))
+func (p *FSPath) String() string {
+	return p.AbsPath
 }
 
 // Exists check file exists or not.
@@ -201,12 +118,61 @@ func (p *FSPath) Stat() (fs.FileInfo, error) {
 
 // IsDir checks if the entity is a directory
 func (p *FSPath) IsDir() bool {
-	return p.isDir
+	isDir := strings.HasSuffix(p.RawPath, "/")
+
+	if !isDir {
+		isDir, _ = afero.IsDir(p.fs, p.AbsPath)
+	}
+
+	return isDir
 }
 
-// OriginalName returns the original name passed in
-func (p *FSPath) OriginalName() string {
-	return p.filepath
+func (p *FSPath) Dir() *FSPath {
+	if p.IsDir() {
+		return p // If it's already a directory, return itself
+	}
+
+	// For files, return the parent directory
+	return Path(filepath.Dir(p.AbsPath))
+}
+
+// BaseDir returns the name of the directory containing the file or directory represented by this FSPath.
+//
+// For a file path, it returns the name of the directory containing the file.
+// For a directory path, it returns the name of the directory itself.
+// For the root directory, it returns "/".
+//
+// This method is useful when you need to know the name of the immediate parent directory
+// without getting the full path to that directory.
+//
+// Returns:
+//   - string: The name of the base directory.
+//
+// Examples:
+//
+//  1. For a file path "/home/user/documents/file.txt":
+//     BaseDir() returns "documents"
+//
+//  2. For a directory path "/home/user/documents/":
+//     BaseDir() returns "documents"
+//
+//  3. For a file in the root directory "/file.txt":
+//     BaseDir() returns "/"
+//
+//  4. For the root directory "/":
+//     BaseDir() returns "/"
+//
+// Note:
+//   - This method does not check if the directory actually exists in the file system.
+//   - It works with the absolute path of the FSPath, regardless of how the FSPath was originally created.
+//
+// Usage:
+//
+//	file := Path("/home/user/documents/file.txt")
+//	baseDirName := file.BaseDir()
+//	// baseDirName is "documents"
+func (p *FSPath) BaseDir() string {
+	return filepath.Base(p.Dir().AbsPath)
 }
 
 // Parts splits the path into its components.
@@ -272,8 +238,7 @@ func (p *FSPath) Parts() []string {
 //   - num: The number of directory levels to go up.
 //
 // Returns:
-//
-//	A string representing the parent directory path.
+//   - A new FSPath instance representing the parent directory path.
 //
 // This method traverses up the directory tree by the specified number of levels.
 // It works with both absolute and relative paths.
@@ -281,52 +246,32 @@ func (p *FSPath) Parts() []string {
 // Examples:
 //
 //  1. For an absolute path "/home/user/documents/file.txt":
-//     - Parents(1) returns "/home/user/documents"
-//     - Parents(2) returns "/home/user"
-//     - Parents(3) returns "/home"
-//     - Parents(4) returns "/"
-//     - Parents(5) or higher returns "/"
-//
-//  2. For a relative path "user/documents/file.txt":
-//     - Parents(1) returns "user/documents"
-//     - Parents(2) returns "user"
-//     - Parents(3) or higher returns ""
-//
-//  3. For an empty path "":
-//     - Parents(n) returns "" for any n
+//     - Parents(1) returns FSPath("/home/user/documents")
+//     - Parents(2) returns FSPath("/home/user")
+//     - Parents(3) returns FSPath("/home")
+//     - Parents(4) or higher returns FSPath("/")
 //
 // Note:
-//   - If num is 0, it returns the current directory path.
-//   - For absolute paths, if num is greater than or equal to the number of directories in the path,
-//     it returns "/".
-//   - For relative paths, if num is greater than or equal to the number of directories in the path,
-//     it returns "".
-func (p *FSPath) Parents(num int) string {
-	if num == 0 || p.AbsPath == "" {
-		return p.AbsPath
+//   - If num is 0, it returns the current path.
+//   - If num is greater than or equal to the number of directories in the path,
+//     it returns the root directory for absolute paths or "." for relative paths.
+func (p *FSPath) Parents(num int) *FSPath {
+	if num <= 0 {
+		return p
 	}
 
-	parts := p.Parts()
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	isAbsolute := strings.HasPrefix(p.AbsPath, "/")
-
-	if isAbsolute {
-		if len(parts) <= num+1 {
-			return "/"
+	current := p
+	for i := 0; i < num; i++ {
+		parent := current.Parent()
+		if parent.AbsPath == current.AbsPath {
+			// We've reached the root directory or "."
+			return parent
 		}
 
-		return "/" + strings.Join(parts[1:len(parts)-num], "/")
-	} else {
-		if len(parts) <= num {
-			return ""
-		}
-
-		return strings.Join(parts[:len(parts)-num], "/")
+		current = parent
 	}
+
+	return current
 }
 
 // Parent returns the immediate parent directory path of the current path.
@@ -363,8 +308,14 @@ func (p *FSPath) Parents(num int) string {
 // Use cases:
 //   - Quickly accessing the parent directory without specifying the number of levels to go up.
 //   - Simplifying code when only the immediate parent is needed.
-func (p *FSPath) Parent() string {
-	return p.Parents(1)
+func (p *FSPath) Parent() *FSPath {
+	if p.AbsPath == "/" {
+		return p // Root directory is its own parent
+	}
+
+	parentPath := filepath.Dir(p.AbsPath)
+
+	return Path(parentPath)
 }
 
 // MkParentDir creates the parent directory for the given path
@@ -377,23 +328,11 @@ func (p *FSPath) MkDirs() error {
 	return p.fs.MkdirAll(p.AbsPath, DirMode755)
 }
 
-// SplitPath splits the given path immediately following the final Separator,
-// separating it into a directory and file name component.
-//
-// Parameters:
-//   - pathStr: The path string to split.
+// SplitPath splits the given path into its directory and file name components.
 //
 // Returns:
 //   - dir: The directory portion of the path.
 //   - name: The file name portion of the path.
-//
-// This method uses filepath.Split internally and works with both file and directory paths.
-// It's useful for separating a path into its directory and file (or final directory) components.
-//
-// Behavior:
-//   - For file paths, it separates the directory and file name.
-//   - For directory paths ending with a separator, the name component will be empty.
-//   - The dir component always ends with a separator.
 //
 // Examples:
 //
@@ -409,235 +348,199 @@ func (p *FSPath) MkDirs() error {
 //     - dir would be "/"
 //     - name would be "file.txt"
 //
-// Note:
-//   - This method does not check if the path actually exists in the file system.
-//   - It works purely on string manipulation and doesn't resolve symlinks or relative paths.
-//   - The behavior is consistent across different operating systems, but the separator
-//     character may vary (e.g., "/" on Unix, "\" on Windows).
-func (p *FSPath) SplitPath(pathStr string) (dir, name string) {
+// Note: This method uses filepath.Split internally and works with both file and directory paths.
+func (p *FSPath) Split(pathStr string) (dir, name string) {
 	return filepath.Split(pathStr)
 }
 
-// GenRelativeFSPath generates a new FSPath instance relative to the current working directory.
+// JoinPath joins one or more path components to the current path.
+//
+// If the current FSPath represents a file, the method joins the components
+// to the parent directory of the file. If it's a directory, it joins directly
+// to the current path.
 //
 // Parameters:
-//   - name: A string representing the relative path and filename.
+//   - others: One or more path components to join to the current path.
 //
 // Returns:
-//   - *FSPath: A new FSPath instance representing the generated path.
+//   - A new FSPath instance representing the joined path.
 //
-// This method creates a new FSPath based on the current working directory and the provided relative path.
-// It joins the current working directory with the provided name and creates a new FSPath from the result.
+// Examples:
+//
+//  1. For a directory "/home/user":
+//     path.JoinPath("documents", "file.txt") returns a new FSPath for "/home/user/documents/file.txt"
+//
+//  2. For a file "/home/user/file.txt":
+//     path.JoinPath("documents", "newfile.txt") returns a new FSPath for "/home/user/documents/newfile.txt"
+//
+//  3. For a path "/":
+//     path.JoinPath("etc", "config") returns a new FSPath for "/etc/config"
+//
+// Note: This method does not modify the original FSPath instance or create any directories.
+// It only returns a new FSPath instance representing the joined path.
+func (p *FSPath) JoinPath(others ...string) *FSPath {
+	if len(others) > 0 && filepath.IsAbs(others[0]) {
+		// If the first component is an absolute path, use it as the base
+		return Path(filepath.Join(others...))
+	}
+
+	components := append([]string{p.AbsPath}, others...)
+
+	return Path(filepath.Join(components...))
+}
+
+// WithName returns a new FSPath with the name changed.
+//
+// This method creates a new FSPath instance with the same parent directory as the original,
+// but with a different name. It's similar to Python's pathlib.Path.with_name() method.
+//
+// Parameters:
+//   - name: The new name for the file or directory.
+//
+// Returns:
+//   - A new FSPath instance with the updated name.
+//
+// Examples:
+//
+//  1. For a file path "/home/user/file.txt":
+//     path.WithName("newfile.txt") would return a new FSPath for "/home/user/newfile.txt"
+//
+//  2. For a directory path "/home/user/docs/":
+//     path.WithName("newdocs") would return a new FSPath for "/home/user/newdocs"
+//
+//  3. For a root-level file "/file.txt":
+//     path.WithName("newfile.txt") would return a new FSPath for "/newfile.txt"
+//
+// Note: This method does not actually rename the file or directory on the file system.
+// It only creates a new FSPath instance with the updated name.
+func (p *FSPath) WithName(name string) *FSPath {
+	return p.Parent().JoinPath(name)
+}
+
+func (p *FSPath) WithStem(stem string) *FSPath {
+	newName := stem + p.Suffix
+
+	return p.Parent().JoinPath(newName)
+}
+
+func (p *FSPath) WithSuffix(suffix string) *FSPath {
+	if suffix != "" && !strings.HasPrefix(suffix, ".") {
+		suffix = "." + suffix
+	}
+
+	return Path(strings.TrimSuffix(p.AbsPath, p.Suffix) + suffix)
+}
+
+// WithRenamedParentDir creates a new FSPath with the parent directory renamed.
+//
+// This method generates a new FSPath that represents the current file or directory
+// placed within a renamed parent directory. The new parent directory name replaces
+// the current parent directory name at the same level in the path hierarchy.
+//
+// Parameters:
+//   - newParentName: The new name for the parent directory.
+//
+// Returns:
+//   - A new *FSPath instance representing the path with the renamed parent directory.
 //
 // Behavior:
-//   - Generates a new absolute path based on the current working directory and the provided name.
-//   - Creates and returns a new FSPath instance for the generated path.
-//   - Resolves relative path components (like ".." or ".") in the provided name.
-//   - Does not create any files or directories; it only generates the FSPath object.
+//   - For files: It creates a new path with the file in the renamed parent directory.
+//   - For directories: It creates a new path with the current directory as a subdirectory of the renamed parent.
+//   - For the root directory: It returns the original FSPath without changes.
 //
 // Examples:
 //
-//	Assume current FSPath represents "/tmp/a/b/current.txt":
+//  1. For a file "/tmp/a/b/file.txt" with newParentName "c":
+//     Result: FSPath representing "/tmp/a/c/file.txt"
 //
-//	1. newPath := currentPath.GenRelativeFSPath("new.txt")
-//	   // newPath represents "/tmp/a/b/new.txt"
+//  2. For a directory "/tmp/a/b/" with newParentName "c":
+//     Result: FSPath representing "/tmp/a/c/b"
 //
-//	2. newPath := currentPath.GenRelativeFSPath("../new.txt")
-//	   // newPath represents "/tmp/a/new.txt"
+//  3. For a file "/file.txt" with newParentName "newdir":
+//     Result: FSPath representing "/newdir/file.txt"
 //
-//	3. newPath := currentPath.GenRelativeFSPath("subdir/new.txt")
-//	   // newPath represents "/tmp/a/b/subdir/new.txt"
-//
-//	4. newPath := currentPath.GenRelativeFSPath("../../other/new.txt")
-//	   // newPath represents "/tmp/other/new.txt"
+//  4. For the root directory "/" with any newParentName:
+//     Result: FSPath representing "/" (unchanged)
 //
 // Note:
-//   - This method does not check if the generated path exists in the file system.
-//   - It's useful for creating FSPath objects for potential new files or directories.
-//   - The generated FSPath is a completely new instance and doesn't inherit properties from the original path.
+//   - This method only generates a new FSPath and does not actually rename directories or move files on the filesystem.
+//   - The method preserves the original file name or the last directory name in the new path.
+//   - If the current path is the root directory, the method returns the original path unchanged.
 //
-// Use cases:
-//   - Generating FSPath objects for related files or directories.
-//   - Preparing paths for subsequent file operations.
-//   - Creating paths relative to the current working directory, including parent directories.
-func (p *FSPath) GenRelativeFSPath(name string) *FSPath {
-	return Path(path.Join(p.WorkingDir, name))
+// Usage:
+//
+//	file := Path("/tmp/a/b/file.txt")
+//	newPath := file.WithRenamedParentDir("c")
+//	// newPath now represents "/tmp/a/c/file.txt"
+func (p *FSPath) WithRenamedParentDir(newParentName string) *FSPath {
+	// If the current path is the root directory, return the original FSPath
+	if p.AbsPath == "/" {
+		return p
+	}
+
+	// Get the parent directory
+	parentDir := p.Parent()
+
+	// Create a new FSPath for the new directory within the parent
+	newDir := parentDir.WithName(newParentName)
+
+	// Join the new directory with the current file name
+	return newDir.JoinPath(p.Name)
 }
 
-// GenPathInSiblingDir generates a new Entity for the current file in a new sibling directory.
+// WithSuffixAndSuffixedParentDir generates a new file path with a changed suffix,
+// and places it in a new directory named with the same suffix appended to the original parent directory name.
 //
 // Parameters:
-//   - newDirName: The name of the new sibling directory to be used in the path.
-//
-// Returns:
-//
-//	A new *Entity representing the file path in the sibling directory.
-//
-// The function works as follows:
-//  1. It determines the parent directory of the current working directory.
-//  2. It constructs a path for a new directory at the same level as the current directory.
-//  3. It generates a new file path by combining the new directory path with the current filename.
-//  4. It creates and returns a new Entity based on this new path.
-//
-// Note:
-//   - This function only generates a new Entity. It does not create any directories or move any files.
-//   - The new directory will be at the same level as the current file's directory, not above it.
-//   - If the current path is at the root directory, the new directory will be created at the root level.
-//
-// Examples:
-//
-//  1. Current file: "/tmp/a/b/file.txt", newDirName: "c"
-//     Result: Entity representing "/tmp/a/c/file.txt"
-//
-//  2. Current file: "/tmp/a/b/", newDirName: "c"
-//     Result: Entity representing "/tmp/a/c/b"
-//
-//  3. Current file: "/root.txt", newDirName: "newdir"
-//     Result: Entity representing "/newdir/root.txt"
-//
-// This function is useful for generating Entities that represent files in parallel directory structures,
-// allowing for easy manipulation and access to file properties in the new location.
-func (p *FSPath) GenPathInSiblingDir(newDirName string) *FSPath {
-	parentDir := filepath.Dir(p.WorkingDir)
-	newFolder := filepath.Join(parentDir, newDirName)
-
-	return Path(filepath.Join(newFolder, p.Name))
-}
-
-// GenFilePathWithNewSuffix generates a new file path with the given suffix, optionally creating a new folder.
-//
-// Parameters:
-//   - newSuffix: The new file suffix (extension) to use, without the leading dot.
-//   - createTypeFolder: If true, creates a new subfolder named after the new suffix.
+//   - newSuffix: The new file suffix (extension) to use, with or without the leading dot.
 //
 // Returns:
 //   - A new *FSPath representing the generated file path.
 //
-// This method generates a new file path based on the current file, changing its suffix
-// and optionally placing it in a new subfolder. It works as follows:
-//  1. It changes the file's suffix to the provided newSuffix.
-//  2. If createTypeFolder is true, it creates a new subfolder named after the new suffix.
-//
-// The behavior changes slightly depending on the current file's location:
-//   - For files not in the root directory:
-//   - Without type folder: /path/to/file.txt -> /path/to/file.newSuffix
-//   - With type folder:    /path/to/file.txt -> /path/to_newSuffix/file.newSuffix
-//   - For files in the root directory:
-//   - Without type folder: /file.txt -> /file.newSuffix
-//   - With type folder:    /file.txt -> /_newSuffix/file.newSuffix
-//
-// Note: This method only generates a new file path. It does not actually create any files or folders.
-//
-// Examples:
-//
-//	file := Path("/tmp/a/b/c.txt")
-//	newPath := file.GenFilePathWithNewSuffix("json", false)  // Results in "/tmp/a/b/c.json"
-//	newPath := file.GenFilePathWithNewSuffix("json", true)   // Results in "/tmp/a/b_json/c.json"
-//
-//	rootFile := Path("/tmp/c.txt")
-//	newPath := rootFile.GenFilePathWithNewSuffix("yaml", true)  // Results in "/tmp/_yaml/c.yaml"
-func (p *FSPath) GenFilePathWithNewSuffix(suffix string, createTypeFolder bool) *FSPath {
-	name := p.Stem + "." + suffix
-	pwd := p.WorkingDir
-
-	if createTypeFolder {
-		dir, last := filepath.Split(p.WorkingDir)
-
-		if dir != "/" {
-			name = fmt.Sprintf("%s_%s/%s", last, suffix, name)
-			pwd = dir
-		} else {
-			name = fmt.Sprintf("_%s/%s", suffix, name)
-		}
-	}
-
-	return Path(path.Join(pwd, name))
-}
-
-// CreateSiblingDir creates a new directory as a sibling to the current path.
-//
-// Parameters:
-//   - name: The name of the new directory to create.
-//
-// Returns:
-//   - *FSPath: A new FSPath instance representing the created directory.
-//   - error: An error if the directory creation fails, nil otherwise.
-//
-// This method creates a new directory in the same directory as the current path,
-// regardless of whether the current path is a file or a directory.
-//
 // Behavior:
-//   - Creates the new directory as a sibling to the current path.
-//   - If the directory already exists, it returns its FSPath without an error.
-//   - Creates all necessary parent directories if they don't exist.
+//  1. Changes the file's suffix to the provided newSuffix.
+//  2. Appends the new suffix (without the dot) to the current parent directory name.
+//  3. For files in the root directory: Creates a new directory prefixed with an underscore and the new suffix (without the dot).
 //
 // Examples:
 //
-//  1. Current path is a file "/tmp/a/b/current.txt":
-//     newDir, err := currentPath.CreateSiblingDir("newFolder")
-//     // newDir represents "/tmp/a/b/newFolder/"
+//  1. File in subdirectory:
+//     "/path/to/file.txt" -> "/path/to_json/file.json"
 //
-//  2. Current path is a directory "/tmp/a/b/":
-//     newDir, err := currentPath.CreateSiblingDir("newFolder")
-//     // newDir represents "/tmp/a/b/newFolder/"
+//  2. File in root directory:
+//     "/file.txt" -> "/_json/file.json"
 //
-// Note:
-//   - This method interacts with the file system and may fail due to permission issues or other I/O errors.
-//   - The returned FSPath represents a directory, so its IsDir() method will return true.
-//   - If a file (not a directory) with the same name already exists, this operation will fail.
-func (p *FSPath) CreateSiblingDir(name string) (*FSPath, error) {
-	// Use GenRelativeFSPath to create a new FSPath for the new directory
-	newDirPath := p.GenRelativeFSPath(name)
-
-	// Use MkDirs method to create the directory
-	err := newDirPath.MkDirs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", newDirPath.AbsPath, err)
+// Notes:
+//   - This method only generates a new FSPath and does not actually create any files or directories.
+//   - If newSuffix is empty, the resulting file will have no extension, but the parent directory will still be renamed.
+//
+// Usage:
+//
+//	file := Path("/tmp/docs/report.txt")
+//	newPath := file.WithSuffixAndSuffixedParentDir(".pdf")
+//	// newPath now represents "/tmp/docs_pdf/report.pdf"
+func (p *FSPath) WithSuffixAndSuffixedParentDir(newSuffix string) *FSPath {
+	// Ensure the new suffix starts with a dot
+	if newSuffix != "" && !strings.HasPrefix(newSuffix, ".") {
+		newSuffix = "." + newSuffix
 	}
 
-	return newDirPath, nil
-}
+	// Remove the dot from the suffix for the directory name
+	dirSuffix := strings.TrimPrefix(newSuffix, ".")
 
-// CreateSiblingDirToParent creates a new directory as a sibling to the parent directory of the current path.
-//
-// Parameters:
-//   - name: The name of the new directory to create.
-//
-// Returns:
-//   - *FSPath: A new FSPath instance representing the created directory.
-//   - error: An error if the directory creation fails, nil otherwise.
-//
-// This method creates a new directory in the same directory as the parent of the current path,
-// regardless of whether the current path is a file or a directory.
-//
-// Behavior:
-//   - Creates the new directory as a sibling to the parent of the current path.
-//   - If the directory already exists, it returns its FSPath without an error.
-//   - Creates all necessary parent directories if they don't exist.
-//
-// Examples:
-//
-//  1. Current path is a file "/tmp/a/b/current.txt":
-//     newDir, err := currentPath.CreateSiblingDirToParent("newFolder")
-//     // newDir represents "/tmp/a/newFolder/"
-//
-//  2. Current path is a directory "/tmp/a/b/":
-//     newDir, err := currentPath.CreateSiblingDirToParent("newFolder")
-//     // newDir represents "/tmp/a/newFolder/"
-//
-// Note:
-//   - This method interacts with the file system and may fail due to permission issues or other I/O errors.
-//   - If a file (not a directory) with the same name already exists, this operation will fail.
-//   - If the current path is at the root directory or one level below, this operation will fail.
-func (p *FSPath) CreateSiblingDirToParent(name string) (*FSPath, error) {
-	// Get the parent of the parent directory
-	grandParentDir := p.Parents(2)
-	if grandParentDir == "" || grandParentDir == "/" {
-		return nil, ErrCannotCreateSiblingDir
+	// Change the file suffix
+	newPath := p.WithSuffix(newSuffix)
+
+	// Handle root directory case
+	if p.Parent().AbsPath == "/" {
+		return p.Parent().JoinPath("_"+dirSuffix, newPath.Name)
 	}
 
-	// Use CreateSiblingDir on the grandparent directory
-	return Path(grandParentDir).CreateSiblingDir(name)
+	// Create new directory name and rename the parent directory
+	newDirName := p.Parent().Name + "_" + dirSuffix
+
+	// Use WithRenamedParentDir to create the new path
+	return newPath.WithRenamedParentDir(newDirName)
 }
 
 func (p *FSPath) Copy(newfile string) error {
@@ -860,7 +763,7 @@ func (p *FSPath) ListFilesWithGlob(pattern string) ([]string, error) {
 		pattern = "*"
 	}
 
-	return afero.Glob(p.fs, filepath.Join(p.WorkingDir, pattern))
+	return afero.Glob(p.fs, filepath.Join(p.Dir().AbsPath, pattern))
 }
 
 // ListFilesWithGlob lists files in the given root directory matching the given pattern
@@ -892,4 +795,39 @@ func Expand(path string) string {
 	}
 
 	return os.ExpandEnv(path)
+}
+
+// resolveAbsPath takes a file path and returns its absolute path.
+//
+// This function first expands any environment variables or user home directory
+// references in the given path. Then, it converts the expanded path to an
+// absolute path without resolving symbolic links.
+//
+// Parameters:
+//   - filePath: A string representing the file path to be converted.
+//
+// Returns:
+//   - string: The absolute path of the input file path.
+//
+// If the function encounters an error while converting to an absolute path,
+// it returns the expanded path instead.
+//
+// Example:
+//
+//	absPath := resolveAbsPath("~/documents/file.txt")
+//	// On a Unix system, this might return "/home/user/documents/file.txt"
+//
+// Note: This function does not check if the path actually exists in the file system.
+func resolveAbsPath(filePath string) string {
+	// Expand the path first
+	expandedPath := Expand(filePath)
+
+	// Convert to absolute path without resolving symlinks
+	absPath, err := filepath.Abs(expandedPath)
+	if err != nil {
+		// If we can't get the absolute path, use the expanded path
+		return expandedPath
+	}
+
+	return absPath
 }
