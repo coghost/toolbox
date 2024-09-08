@@ -3,9 +3,8 @@ module github.com/coghost/toolbox/pathlib
 go 1.22.5
 
 require (
-	github.com/gookit/goutil v0.6.16
+	github.com/spf13/afero v1.11.0
 	github.com/stretchr/testify v1.9.0
-	github.com/ungerik/go-dry v0.0.0-20231011182423-d9a07fd18c5f
 )
 
 require (

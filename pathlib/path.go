@@ -2,42 +2,55 @@ package pathlib
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
-	"github.com/gookit/goutil/fsutil"
-	"github.com/ungerik/go-dry"
+	"github.com/spf13/afero"
 )
+
+const (
+	_mode644 = 0o644 // Read and write for owner, read for group and others
+	_mode755 = 0o755 // Read, write, and execute for owner, read and execute for group and others
+)
+
+var (
+	FileMode644 = os.FileMode(_mode644)
+	DirMode755  = os.FileMode(_mode755)
+)
+
+var ErrCannotCreateSiblingDir = errors.New("cannot create sibling directory to parent: current path is at root or one level below")
 
 // FSPath represents a file system entity with various properties
 type FSPath struct {
-	// Name represents the base name of the file or directory without any suffix (file extension).
+	// Stem represents the base name of the file or directory without any suffix (file extension).
 	// For files, it's the file name without the extension. For directories, it's the directory name.
 	//
 	// Examples:
-	//   - For a file "/tmp/folder/file.txt", Name would be "file"
-	//   - For a directory "/tmp/folder/", Name would be "folder"
-	//   - For a file "document.tar.gz", Name would be "document.tar"
+	//   - For a file "/tmp/folder/file.txt", Stem would be "file"
+	//   - For a directory "/tmp/folder/", Stem would be "folder"
+	//   - For a file "document.tar.gz", Stem would be "document.tar"
 	//
 	// This field is useful when you need to work with the core name of a file or directory
 	// without considering its extension or full path.
-	Name string
+	Stem string
 
-	// NameWithSuffix represents the base name of the file or directory, including any suffix (file extension).
+	// Name represents the base name of the file or directory, including any suffix (file extension).
 	// For files, it's the file name with the extension. For directories, it's the same as the Name field.
 	//
 	// Examples:
-	//   - For a file "/tmp/folder/file.txt", NameWithSuffix would be "file.txt"
-	//   - For a directory "/tmp/folder/", NameWithSuffix would be "folder"
-	//   - For a file "document.tar.gz", NameWithSuffix would be "document.tar.gz"
+	//   - For a file "/tmp/folder/file.txt", Name would be "file.txt"
+	//   - For a directory "/tmp/folder/", Name would be "folder"
+	//   - For a file "document.tar.gz", Name would be "document.tar.gz"
 	//
 	// This field is useful when you need to work with the full name of a file including its extension,
 	// or when you need to distinguish between files with the same base name but different extensions.
-	NameWithSuffix string
+	Name string
 
 	// WorkingDir represents the absolute path of the working directory associated with this FSPath.
 	// For files, it's the directory containing the file. For directories, it's the directory path itself.
@@ -92,44 +105,98 @@ type FSPath struct {
 
 	filepath string
 	isDir    bool
+
+	fs afero.Fs // The underlying file system
 }
 
 // Path creates and returns a new Entity from the given file path
 func Path(filePath string) *FSPath {
-	nameWithSuffix := fsutil.Name(filePath)
-	suffix := fsutil.Suffix(filePath)
-	name := strings.TrimSuffix(nameWithSuffix, suffix)
-	absPath := fsutil.Expand(filePath)
-	isDir := fsutil.IsDir(absPath)
+	fs := afero.NewOsFs()
+	isDir := strings.HasSuffix(filePath, "/")
 
-	working := absPath
+	absPath := getAbsPath(filePath)
+	nameWithSuffix := filepath.Base(filePath)
+	suffix := filepath.Ext(filePath)
+	name := strings.TrimSuffix(nameWithSuffix, suffix)
+
 	if !isDir {
-		working = filepath.Dir(working)
+		isDir, _ = afero.IsDir(fs, absPath)
 	}
+
+	working := determineWorkingDir(absPath, isDir)
 
 	pth := &FSPath{
 		AbsPath:    absPath,
 		BaseDir:    filepath.Base(working),
-		WorkingDir: strings.TrimSuffix(working, "/"),
+		WorkingDir: working,
 
-		Name:           name,
-		NameWithSuffix: nameWithSuffix,
-		Suffix:         suffix,
+		Stem:   name,
+		Name:   nameWithSuffix,
+		Suffix: suffix,
 
 		filepath: filePath,
 		isDir:    isDir,
+
+		fs: fs, // Use OS file system by default
 	}
 
 	return pth
 }
 
-// Exists check file exists or not.
-func (p *FSPath) Exists() bool {
-	if p.isDir {
-		return fsutil.DirExist(p.AbsPath)
+// PathWithFs creates a new FSPath with a custom afero.Fs
+func PathWithFs(filePath string, fs afero.Fs) *FSPath {
+	pth := Path(filePath)
+	pth.fs = fs
+
+	return pth
+}
+
+// New function to handle absolute path logic
+func getAbsPath(filePath string) string {
+	// Expand the path first
+	expandedPath := Expand(filePath)
+
+	// Convert to absolute path without resolving symlinks
+	absPath, err := filepath.Abs(expandedPath)
+	if err != nil {
+		// If we can't get the absolute path, use the expanded path
+		return expandedPath
 	}
 
-	return fsutil.FileExists(p.AbsPath)
+	// Preserve /var/folders/ prefix if it exists
+	if strings.HasPrefix(absPath, "/private/var/folders/") {
+		return strings.TrimPrefix(absPath, "/private")
+	}
+
+	return absPath
+}
+
+// New function to handle working directory logic
+func determineWorkingDir(absPath string, isDir bool) string {
+	var working string
+
+	if isDir {
+		working = absPath
+	} else {
+		working = filepath.Dir(absPath)
+	}
+
+	// Handle root directory case
+	if working == string(os.PathSeparator) {
+		return string(os.PathSeparator)
+	}
+
+	return strings.TrimSuffix(working, string(os.PathSeparator))
+}
+
+// Exists check file exists or not.
+func (p *FSPath) Exists() bool {
+	_, err := p.Stat()
+	return err == nil
+}
+
+func (p *FSPath) Stat() (fs.FileInfo, error) {
+	return p.fs.Stat(p.AbsPath)
 }
 
 // IsDir checks if the entity is a directory
@@ -189,6 +256,7 @@ func (p *FSPath) Parts() []string {
 
 	// Filter out empty parts
 	var result []string
+
 	for _, part := range parts {
 		if part != "" {
 			result = append(result, part)
@@ -250,11 +318,13 @@ func (p *FSPath) Parents(num int) string {
 		if len(parts) <= num+1 {
 			return "/"
 		}
+
 		return "/" + strings.Join(parts[1:len(parts)-num], "/")
 	} else {
 		if len(parts) <= num {
 			return ""
 		}
+
 		return strings.Join(parts[:len(parts)-num], "/")
 	}
 }
@@ -299,12 +369,12 @@ func (p *FSPath) Parent() string {
 
 // MkParentDir creates the parent directory for the given path
 func (p *FSPath) MkParentDir() error {
-	return fsutil.MkParentDir(p.AbsPath)
+	return p.fs.MkdirAll(filepath.Dir(p.AbsPath), DirMode755)
 }
 
 // MkDirs quick create dir for given path.
 func (p *FSPath) MkDirs() error {
-	return os.MkdirAll(p.AbsPath, 0o755) //nolint:mnd
+	return p.fs.MkdirAll(p.AbsPath, DirMode755)
 }
 
 // SplitPath splits the given path immediately following the final Separator,
@@ -431,7 +501,7 @@ func (p *FSPath) GenPathInSiblingDir(newDirName string) *FSPath {
 	parentDir := filepath.Dir(p.WorkingDir)
 	newFolder := filepath.Join(parentDir, newDirName)
 
-	return Path(filepath.Join(newFolder, p.NameWithSuffix))
+	return Path(filepath.Join(newFolder, p.Name))
 }
 
 // GenFilePathWithNewSuffix generates a new file path with the given suffix, optionally creating a new folder.
@@ -467,11 +537,11 @@ func (p *FSPath) GenPathInSiblingDir(newDirName string) *FSPath {
 //	rootFile := Path("/tmp/c.txt")
 //	newPath := rootFile.GenFilePathWithNewSuffix("yaml", true)  // Results in "/tmp/_yaml/c.yaml"
 func (p *FSPath) GenFilePathWithNewSuffix(suffix string, createTypeFolder bool) *FSPath {
-	name := p.Name + "." + suffix
+	name := p.Stem + "." + suffix
 	pwd := p.WorkingDir
 
 	if createTypeFolder {
-		dir, last := fsutil.SplitPath(p.WorkingDir)
+		dir, last := filepath.Split(p.WorkingDir)
 
 		if dir != "/" {
 			name = fmt.Sprintf("%s_%s/%s", last, suffix, name)
@@ -563,21 +633,45 @@ func (p *FSPath) CreateSiblingDirToParent(name string) (*FSPath, error) {
 	// Get the parent of the parent directory
 	grandParentDir := p.Parents(2)
 	if grandParentDir == "" || grandParentDir == "/" {
-		return nil, fmt.Errorf("cannot create sibling directory to parent: current path is at root or one level below")
+		return nil, ErrCannotCreateSiblingDir
 	}
 
 	// Use CreateSiblingDir on the grandparent directory
 	return Path(grandParentDir).CreateSiblingDir(name)
 }
 
-// Copy copies the file to a new location
-func (p *FSPath) Copy(name string) error {
-	return dry.FileCopy(p.AbsPath, name)
+func (p *FSPath) Copy(newfile string) error {
+	sourceFile, err := p.Reader()
+	if err != nil {
+		return err
+	}
+
+	destFile, err := os.Create(newfile)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return err
+	}
+
+	si, err := p.Stat()
+	if err == nil {
+		err = os.Chmod(newfile, si.Mode())
+	}
+
+	return err
 }
 
-// Move moves the file to a new location
-func (p *FSPath) Move(fullpath string) error {
-	return os.Rename(p.AbsPath, fullpath)
+func (p *FSPath) Move(newfile string) error {
+	return p.Rename(newfile)
+}
+
+// Rename moves the file to a new location
+func (p *FSPath) Rename(newfile string) error {
+	return p.fs.Rename(p.AbsPath, newfile)
 }
 
 // e checks the last argument for an error and panics if one is found.
@@ -589,13 +683,11 @@ func (p *FSPath) Move(fullpath string) error {
 // Example:
 //
 //	p.e(someFunction())  // panics if someFunction returns an error
-func (p *FSPath) e(args ...interface{}) []interface{} {
+func (p *FSPath) e(args ...interface{}) {
 	err, ok := args[len(args)-1].(error)
 	if ok {
 		panic(err)
 	}
-
-	return args
 }
 
 // MustSetString sets the file content as a string, panics on error
@@ -613,27 +705,32 @@ func (p *FSPath) SetBytes(data []byte) error {
 		return err
 	}
 
-	return dry.FileSetBytes(p.AbsPath, data)
+	return afero.WriteFile(p.fs, p.AbsPath, data, FileMode644)
 }
 
 func (p *FSPath) GetString() (string, error) {
-	return dry.FileGetString(p.AbsPath)
+	data, err := p.GetBytes()
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
 }
 
 // Reader returns an io.Reader for the file
 func (p *FSPath) Reader() (io.Reader, error) {
-	return dry.FileBufferedReader(p.AbsPath)
+	return p.fs.Open(p.AbsPath)
 }
 
 func (p *FSPath) MustGetBytes() []byte {
-	b, err := dry.FileGetBytes(p.AbsPath)
+	b, err := p.GetBytes()
 	p.e(err)
 
 	return b
 }
 
 func (p *FSPath) GetBytes() ([]byte, error) {
-	return dry.FileGetBytes(p.AbsPath)
+	return afero.ReadFile(p.fs, p.AbsPath)
 }
 
 // CSVGetSlices reads the CSV file and returns its content as slices.
@@ -715,6 +812,7 @@ func (p *FSPath) TSVGetSlices() ([][]string, error) {
 func (p *FSPath) MustCSVGetSlices() [][]string {
 	arr, err := p.CSVGetSlices()
 	p.e(err)
+
 	return arr
 }
 
@@ -739,6 +837,7 @@ func (p *FSPath) MustCSVGetSlices() [][]string {
 func (p *FSPath) MustTSVGetSlices() [][]string {
 	arr, err := p.TSVGetSlices()
 	p.e(err)
+
 	return arr
 }
 
@@ -757,7 +856,11 @@ func (p *FSPath) readDelimitedFile(separator rune) ([][]string, error) {
 
 // ListFilesWithGlob lists files in the working directory matching the given pattern
 func (p *FSPath) ListFilesWithGlob(pattern string) ([]string, error) {
-	return ListFilesWithGlob(p.WorkingDir, pattern)
+	if pattern == "" {
+		pattern = "*"
+	}
+
+	return afero.Glob(p.fs, filepath.Join(p.WorkingDir, pattern))
 }
 
 // ListFilesWithGlob lists files in the given root directory matching the given pattern
@@ -766,5 +869,27 @@ func ListFilesWithGlob(rootDir, pattern string) ([]string, error) {
 		pattern = "*"
 	}
 
-	return filepath.Glob(fsutil.Expand(rootDir) + "/" + pattern)
+	return filepath.Glob(filepath.Join(Expand(rootDir), pattern))
+}
+
+func Expand(path string) string {
+	// Return immediately if path is empty
+	if path == "" {
+		return path
+	}
+
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path // Return original path if there's an error
+		}
+
+		if path == "~" {
+			return home
+		}
+
+		return filepath.Join(home, path[2:])
+	}
+
+	return os.ExpandEnv(path)
 }
