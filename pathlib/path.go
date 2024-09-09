@@ -11,7 +11,10 @@ import (
 )
 
 const (
+	_mode555 = 0o555
+	_mode600 = 0o600
 	_mode644 = 0o644 // Read and write for owner, read for group and others
+	_mode666 = 0o666
 	_mode755 = 0o755 // Read, write, and execute for owner, read and execute for group and others
 )
 
@@ -112,6 +115,10 @@ func PathE(filePath string) (*FsPath, error) {
 }
 
 func (p *FsPath) String() string {
+	return p.absPath
+}
+
+func (p *FsPath) AbsPath() string {
 	return p.absPath
 }
 

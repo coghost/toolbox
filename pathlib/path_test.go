@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/k0kubun/pp/v3"
 	"github.com/spf13/afero"
@@ -598,7 +599,67 @@ func (s *PathSuite) TestParent() {
 }
 
 func (s *PathSuite) TestParents() {
-	currentDir, err := os.Getwd()
+	currentDir, err := Cwd()
+	s.Require().NoError(err)
+
+	tests := []struct {
+		name     string
+		path     string
+		expected []string
+	}{
+		{
+			name: "multi-level directory",
+			path: "/home/user/documents/file.txt",
+			expected: []string{
+				"/home/user/documents",
+				"/home/user",
+				"/home",
+				"/",
+			},
+		},
+		{
+			name:     "root directory",
+			path:     "/",
+			expected: []string{},
+		},
+		{
+			name: "single-level directory",
+			path: "/home",
+			expected: []string{
+				"/",
+			},
+		},
+		{
+			name: "relative path",
+			path: "user/documents/file.txt",
+			expected: []string{
+				currentDir.JoinPath("user/documents").absPath,
+				currentDir.JoinPath("user").absPath,
+			},
+		},
+		{
+			name:     "current directory",
+			path:     ".",
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			parents := file.Parents()
+
+			s.Equal(len(tt.expected), len(parents), "Number of parents doesn't match for path: %s", tt.path)
+
+			for i, parent := range parents {
+				s.Equal(tt.expected[i], parent.absPath, "Parent path doesn't match at index %d for path: %s", i, tt.path)
+			}
+		})
+	}
+}
+
+func (s *PathSuite) TestParentsUpTo() {
+	currentDir, err := Cwd()
 	s.Require().NoError(err)
 
 	tests := []struct {
@@ -647,7 +708,13 @@ func (s *PathSuite) TestParents() {
 			name: "relative path",
 			raw:  "documents/subdirectory/file.txt",
 			n:    2,
-			want: filepath.Join(currentDir, "documents"),
+			want: currentDir.JoinPath("documents").absPath,
+		},
+		{
+			name: "beyond relative path",
+			raw:  "documents/subdirectory/file.txt",
+			n:    5,
+			want: currentDir.JoinPath("documents").ParentsUpTo(3).absPath,
 		},
 		{
 			name: "with trailing slash",
@@ -660,7 +727,7 @@ func (s *PathSuite) TestParents() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.raw)
-			got := file.Parents(tt.n)
+			got := file.ParentsUpTo(tt.n)
 
 			if filepath.IsAbs(tt.raw) {
 				s.Equal(tt.want, got.absPath, "Unexpected parent path")
@@ -915,7 +982,7 @@ func (s *PathSuite) TestReadDelimitedFileErrors() {
 	fspath := Path(nonExistentPath)
 
 	_, err := fspath.readDelimitedFile(',')
-	s.Error(err)
+	s.Require().Error(err)
 }
 
 func (s *PathSuite) TestMustMethodsPanic() {
@@ -1179,13 +1246,244 @@ func (s *PathSuite) TestRelativeTo() {
 			file := Path(tt.path)
 			result, err := file.RelativeTo(tt.other)
 			if tt.hasError {
-				s.Error(err)
+				s.Require().Error(err)
 			} else {
 				s.Require().NoError(err)
 				s.Equal(tt.expected, result)
 			}
 		})
 	}
+}
+
+func (s *PathSuite) TestMkdir() {
+	// Test creating a single directory
+	singleDir := filepath.Join(s.tempDir, "singleDir")
+	singlePath := Path(singleDir)
+	err := singlePath.Mkdir(0o755, false)
+	s.Require().NoError(err)
+	s.DirExists(singleDir)
+
+	// Test creating a directory that already exists
+	err = singlePath.Mkdir(0o755, false)
+	s.Require().Error(err)
+	s.True(os.IsExist(err), "Expected 'file exists' error, got: %v", err)
+
+	// Test creating nested directories with parents=true
+	nestedDir := filepath.Join(s.tempDir, "parent", "child", "grandchild")
+	nestedPath := Path(nestedDir)
+	err = nestedPath.Mkdir(0o755, true)
+	s.Require().NoError(err)
+	s.DirExists(nestedDir)
+
+	// Test creating a nested directory without parents=true
+	failDir := filepath.Join(s.tempDir, "fail", "dir")
+	failPath := Path(failDir)
+	err = failPath.Mkdir(0o755, false)
+	s.Require().Error(err)
+	s.True(os.IsNotExist(err), "Expected 'no such file or directory' error, got: %v", err)
+
+	// Test creating an existing directory with parents=true
+	err = nestedPath.Mkdir(0o755, true)
+	s.Require().NoError(err, "Creating an existing directory with parents=true should not error")
+
+	// Test creating a directory with different permissions
+	permDir := filepath.Join(s.tempDir, "permDir")
+	permPath := Path(permDir)
+	err = permPath.Mkdir(0o700, false)
+	s.Require().NoError(err)
+	info, err := os.Stat(permDir)
+	s.Require().NoError(err)
+	s.Equal(os.FileMode(0o700), info.Mode().Perm())
+
+	// Test creating nested directories with different permissions
+	nestedPermDir := filepath.Join(s.tempDir, "nestedPerm", "child")
+	nestedPermPath := Path(nestedPermDir)
+	err = nestedPermPath.Mkdir(0o700, true)
+	s.Require().NoError(err)
+	info, err = os.Stat(nestedPermDir)
+	s.Require().NoError(err)
+	s.Equal(os.FileMode(0o700), info.Mode().Perm())
+
+	// Test creating a directory in a read-only location (if possible)
+	if os.Geteuid() != 0 { // Skip this test if running as root
+		readOnlyDir := "/tmp/readOnlyDir"
+
+		err := os.Mkdir(readOnlyDir, _mode555)
+		s.Require().NoError(err)
+
+		defer os.RemoveAll(readOnlyDir)
+
+		readOnlyPath := Path(filepath.Join(readOnlyDir, "newDir"))
+		err = readOnlyPath.Mkdir(0o755, false)
+		s.Require().Error(err)
+	}
+}
+
+func (s *PathSuite) TestTouch() {
+	s.T().Parallel() // Mark this test as parallel
+
+	// Create a unique temporary directory for this test
+	testDir, err := os.MkdirTemp("", "TestTouch")
+	s.Require().NoError(err)
+	defer os.RemoveAll(testDir) // Clean up after the test
+
+	testFile := filepath.Join(testDir, "testTouch.txt")
+	path := Path(testFile)
+
+	// Test creating a new file
+	err = path.Touch()
+	s.Require().NoError(err)
+	s.FileExists(testFile)
+
+	// Get initial modification time
+	initialStat, err := os.Stat(testFile)
+	s.Require().NoError(err)
+	initialModTime := initialStat.ModTime()
+
+	// Wait a moment to ensure the modification time can change
+	time.Sleep(time.Millisecond * 100)
+
+	// Test updating an existing file
+	err = path.Touch()
+	s.Require().NoError(err)
+
+	// Check if modification time has been updated
+	newStat, err := os.Stat(testFile)
+	s.Require().NoError(err)
+	s.True(newStat.ModTime().After(initialModTime),
+		"New mod time (%v) should be after initial mod time (%v)",
+		newStat.ModTime(), initialModTime)
+}
+
+func (s *PathSuite) TestChmod() {
+	testFile := filepath.Join(s.tempDir, "testChmod.txt")
+	path := Path(testFile)
+
+	// Create a test file
+	err := os.WriteFile(testFile, []byte("test content"), _mode644)
+	s.Require().NoError(err)
+
+	// Test changing permissions
+	err = path.Chmod(_mode600)
+	s.Require().NoError(err)
+
+	// Check if permissions were changed
+	info, err := os.Stat(testFile)
+	s.Require().NoError(err)
+	s.Equal(os.FileMode(_mode600), info.Mode().Perm())
+
+	// Test changing permissions on a non-existent file
+	nonExistentPath := Path(filepath.Join(s.tempDir, "nonexistent.txt"))
+	err = nonExistentPath.Chmod(_mode644)
+	s.Require().Error(err)
+}
+
+func (s *PathSuite) TestUnlink() {
+	s.T().Parallel()
+
+	testDir := s.T().TempDir()
+
+	// Test unlinking an existing file
+	existingFile := Path(filepath.Join(testDir, "existing.txt"))
+	err := existingFile.WriteText("test content")
+	s.Require().NoError(err)
+
+	err = existingFile.Unlink(false)
+	s.Require().NoError(err)
+	s.False(existingFile.Exists())
+
+	// Test unlinking a non-existent file with force=false
+	nonExistentFile := Path(filepath.Join(testDir, "nonexistent.txt"))
+	err = nonExistentFile.Unlink(false)
+	s.Require().Error(err)
+	s.True(os.IsNotExist(err))
+
+	// Test unlinking a non-existent file with force=true
+	err = nonExistentFile.Unlink(true)
+	s.Require().NoError(err)
+
+	// Test unlinking a directory
+	dirPath := Path(filepath.Join(testDir, "testdir"))
+	err = dirPath.Mkdir(0o755, false)
+	s.Require().NoError(err)
+
+	err = dirPath.Unlink(false)
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, ErrCannotUnlinkDir)
+	s.True(dirPath.Exists())
+
+	// Test unlinking a symlink
+	targetFile := Path(filepath.Join(testDir, "targetfile"))
+	err = targetFile.WriteText("target content")
+	s.Require().NoError(err)
+
+	symlinkPath := Path(filepath.Join(testDir, "symlink"))
+	err = os.Symlink(targetFile.absPath, symlinkPath.absPath)
+	s.Require().NoError(err)
+
+	err = symlinkPath.Unlink(false)
+	s.Require().NoError(err)
+
+	// Use os.Lstat to check if the symlink itself is gone
+	_, err = os.Lstat(symlinkPath.absPath)
+	s.True(os.IsNotExist(err), "Symlink should not exist after unlinking")
+
+	// Ensure the target file still exists
+	s.True(targetFile.Exists(), "Target file should still exist after unlinking symlink")
+}
+
+func (s *PathSuite) TestRmdir() {
+	s.T().Parallel()
+
+	testDir := s.T().TempDir()
+
+	// Test removing an empty directory
+	emptyDir := Path(filepath.Join(testDir, "emptyDir"))
+	err := emptyDir.Mkdir(0o755, false)
+	s.Require().NoError(err)
+
+	err = emptyDir.Rmdir()
+	s.Require().NoError(err)
+	s.False(emptyDir.Exists())
+
+	// Test removing a non-existent directory
+	nonExistentDir := Path(filepath.Join(testDir, "nonExistentDir"))
+	err = nonExistentDir.Rmdir()
+	s.Require().Error(err)
+	s.True(os.IsNotExist(err))
+
+	// Test removing a non-empty directory
+	nonEmptyDir := Path(filepath.Join(testDir, "nonEmptyDir"))
+	err = nonEmptyDir.Mkdir(0o755, false)
+	s.Require().NoError(err)
+	fileInDir := nonEmptyDir.JoinPath("file.txt")
+	err = fileInDir.WriteText("test content")
+	s.Require().NoError(err)
+
+	err = nonEmptyDir.Rmdir()
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, ErrDirectoryNotEmpty)
+	s.True(nonEmptyDir.Exists())
+
+	// Test removing a file
+	filePath := Path(filepath.Join(testDir, "file.txt"))
+	err = filePath.WriteText("test content")
+	s.Require().NoError(err)
+
+	err = filePath.Rmdir()
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, ErrNotDirectory)
+	s.True(filePath.Exists())
+
+	// Test removing a symlink to a directory
+	symlinkDir := Path(filepath.Join(testDir, "symlinkDir"))
+	err = os.Symlink(nonEmptyDir.absPath, symlinkDir.absPath)
+	s.Require().NoError(err)
+
+	err = symlinkDir.Rmdir()
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, ErrDirectoryNotEmpty)
+	s.True(symlinkDir.Exists())
 }
 
 func (s *PathSuite) Test00Manual() {

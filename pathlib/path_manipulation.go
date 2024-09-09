@@ -1,9 +1,70 @@
 package pathlib
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 )
+
+// Home returns a new FsPath representing the user's home directory.
+//
+// This method is equivalent to calling the Home() function.
+//
+// Returns:
+//   - *FsPath: A new FsPath instance representing the user's home directory.
+//   - error: An error if the home directory couldn't be determined.
+//
+// Example:
+//
+//	homePath, err := path.Home()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fmt.Println(homePath.absPath)
+func (p *FsPath) Home() (*FsPath, error) {
+	return Home()
+}
+
+// Cwd returns a new FsPath representing the current working directory.
+//
+// This method is equivalent to calling the Cwd() function.
+//
+// Returns:
+//   - *FsPath: A new FsPath instance representing the current working directory.
+//   - error: An error if the current working directory couldn't be determined.
+//
+// Example:
+//
+//	cwdPath, err := path.Cwd()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fmt.Println(cwdPath.absPath)
+func (p *FsPath) Cwd() (*FsPath, error) {
+	return Cwd()
+}
+
+// ExpandUser replaces a leading ~ or ~user with the user's home directory.
+//
+// This method is equivalent to calling the ExpandUser() function on the path.
+//
+// Returns:
+//   - A new FsPath with the expanded path.
+func (p *FsPath) ExpandUser() *FsPath {
+	expandedPath := ExpandUser(p.absPath)
+	return Path(expandedPath)
+}
+
+// Expand expands environment variables and user's home directory in the path.
+//
+// This method is equivalent to calling the Expand() function on the path.
+//
+// Returns:
+//   - A new FsPath with the expanded path.
+func (p *FsPath) Expand() *FsPath {
+	expandedPath := Expand(p.absPath)
+	return Path(expandedPath)
+}
 
 // BaseDir returns the name of the directory containing the file or directory represented by this FSPath.
 //
@@ -133,7 +194,43 @@ func (p *FsPath) Parent() *FsPath {
 	return Path(parentPath)
 }
 
-// Parents returns the parent directory path up to the specified number of levels.
+// Parents returns an iterator of this path's logical parents.
+//
+// Returns:
+//   - A slice of FsPath instances representing all the logical parents of the path.
+//
+// The first parent is the immediate parent of the path, and the last parent is the root path.
+func (p *FsPath) Parents() []*FsPath {
+	var parents []*FsPath
+
+	// If the current path is ".", return an empty slice
+	if p.RawPath == "." {
+		return parents
+	}
+
+	current := p
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		// If we can't get the current working directory, just return an empty slice
+		return parents
+	}
+
+	for {
+		parent := current.Parent()
+		if parent.absPath == current.absPath || parent.absPath == cwd {
+			// We've reached the root directory or the current working directory
+			break
+		}
+
+		parents = append(parents, parent)
+		current = parent
+	}
+
+	return parents
+}
+
+// ParentsUpTo returns the parent directory path up to the specified number of levels.
 //
 // Parameters:
 //   - num: The number of directory levels to go up.
@@ -147,16 +244,16 @@ func (p *FsPath) Parent() *FsPath {
 // Examples:
 //
 //  1. For an absolute path "/home/user/documents/file.txt":
-//     - Parents(1) returns FSPath("/home/user/documents")
-//     - Parents(2) returns FSPath("/home/user")
-//     - Parents(3) returns FSPath("/home")
-//     - Parents(4) or higher returns FSPath("/")
+//     - ParentsUpTo(1) returns FSPath("/home/user/documents")
+//     - ParentsUpTo(2) returns FSPath("/home/user")
+//     - ParentsUpTo(3) returns FSPath("/home")
+//     - ParentsUpTo(4) or higher returns FSPath("/")
 //
 // Note:
 //   - If num is 0, it returns the current path.
 //   - If num is greater than or equal to the number of directories in the path,
 //     it returns the root directory for absolute paths or "." for relative paths.
-func (p *FsPath) Parents(num int) *FsPath {
+func (p *FsPath) ParentsUpTo(num int) *FsPath {
 	if num <= 0 {
 		return p
 	}
