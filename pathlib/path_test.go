@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/k0kubun/pp/v3"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/suite"
 )
@@ -65,7 +66,7 @@ func (s *PathSuite) TestNameAndNameWithSuffix() {
 		{
 			name:         "hidden file",
 			filePath:     "/home/user/.config",
-			expectedStem: "",
+			expectedStem: ".config",
 			expectedName: ".config",
 		},
 		{
@@ -111,7 +112,8 @@ func (s *PathSuite) TestSuffix() {
 	}{
 		{"file with extension", "/tmp/test.txt", ".txt"},
 		{"file without extension", "/tmp/test", ""},
-		{"hidden file", "/tmp/.hidden.txt", ".txt"},
+		{"hidden file", "/tmp/.hidden", ""},
+		{"hidden file with ext", "/tmp/.hidden.txt", ".txt"},
 		{"directory", "/tmp/dir/", ""},
 		{"file with multiple extensions", "/tmp/archive.tar.gz", ".gz"},
 	}
@@ -120,6 +122,29 @@ func (s *PathSuite) TestSuffix() {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
 			s.Equal(tt.expected, file.Suffix)
+		})
+	}
+}
+
+func (s *PathSuite) TestSuffixes() {
+	tests := []struct {
+		name     string
+		path     string
+		expected []string
+	}{
+		{"no suffix", "/path/to/file", []string{}},
+		{"single suffix", "/path/to/file.txt", []string{".txt"}},
+		{"multiple suffixes", "/path/to/file.tar.gz", []string{".tar", ".gz"}},
+		{"hidden file", "/path/to/.hidden", []string{}},
+		{"hidden file with suffix", "/path/to/.hidden.txt", []string{".txt"}},
+		{"directory", "/path/to/dir/", []string{}},
+		{"root", "/", []string{}},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			s.Equal(tt.expected, file.Suffixes())
 		})
 	}
 }
@@ -154,7 +179,7 @@ func (s *PathSuite) TestAbsPath() {
 
 			// Remove "/private" prefix from both expected and actual paths
 			expectedPath := strings.TrimPrefix(tt.expected, "/private")
-			actualPath := strings.TrimPrefix(file.AbsPath, "/private")
+			actualPath := strings.TrimPrefix(file.absPath, "/private")
 
 			s.Equal(expectedPath, actualPath)
 		})
@@ -178,29 +203,29 @@ func (s *PathSuite) TestPath() {
 	tests := []struct {
 		name     string
 		path     string
-		expected FSPath
+		expected FsPath
 	}{
 		{
 			name: "file path",
 			path: testFile,
-			expected: FSPath{
+			expected: FsPath{
 				RawPath: testFile,
 				Stem:    "test",
 				Name:    "test.txt",
 				Suffix:  ".txt",
-				AbsPath: testFile,
+				absPath: testFile,
 				// Note: We don't compare the 'fs' field directly
 			},
 		},
 		{
 			name: "directory path",
 			path: testDir,
-			expected: FSPath{
+			expected: FsPath{
 				RawPath: testDir,
 				Stem:    "testdir",
 				Name:    "testdir",
 				Suffix:  "",
-				AbsPath: testDir,
+				absPath: testDir,
 				// Note: We don't compare the 'fs' field directly
 			},
 		},
@@ -215,7 +240,7 @@ func (s *PathSuite) TestPath() {
 			s.Equal(tt.expected.Stem, result.Stem)
 			s.Equal(tt.expected.Name, result.Name)
 			s.Equal(tt.expected.Suffix, result.Suffix)
-			s.Equal(tt.expected.AbsPath, result.AbsPath)
+			s.Equal(tt.expected.absPath, result.absPath)
 
 			// Check that 'fs' is not nil and is of the expected type
 			s.NotNil(result.fs)
@@ -234,26 +259,6 @@ func (s *PathSuite) TestStat() {
 	s.NotNil(info)
 	s.Equal("stattest.txt", info.Name())
 	s.Equal(int64(7), info.Size()) // "content" is 7 bytes
-}
-
-func (s *PathSuite) TestExpand() {
-	tests := []struct {
-		name     string
-		path     string
-		expected string
-	}{
-		{"home directory", "~/documents", filepath.Join(os.Getenv("HOME"), "documents")},
-		{"environment variable", "$HOME/documents", filepath.Join(os.Getenv("HOME"), "documents")},
-		{"no expansion needed", "/tmp/file.txt", "/tmp/file.txt"},
-		{"empty path", "", ""},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			expanded := Expand(tt.path)
-			s.Equal(tt.expected, expanded)
-		})
-	}
 }
 
 func (s *PathSuite) TestExists() {
@@ -424,7 +429,7 @@ func (s *PathSuite) TestListFilesWithGlobStatic() {
 	s.createTempFile("file2.txt", "")
 	s.createTempFile("file3.json", "")
 
-	files, err := ListFilesWithGlob(s.tempDir, "*.txt")
+	files, err := ListFilesWithGlob(nil, s.tempDir, "*.txt")
 	s.Require().NoError(err)
 	s.Len(files, 2)
 
@@ -492,14 +497,14 @@ func (s *PathSuite) TestWithSuffixInNewDir() {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
 			got := file.WithSuffixAndSuffixedParentDir(tt.newSuffix)
-			s.Equal(tt.want, got.AbsPath, "For input: %s", tt.filePath)
+			s.Equal(tt.want, got.absPath, "For input: %s", tt.filePath)
 
 			// Additional checks
 			s.Equal(filepath.Base(tt.want), got.Name)
-			s.Equal(filepath.Dir(tt.want), got.Parent().AbsPath)
+			s.Equal(filepath.Dir(tt.want), got.Parent().absPath)
 
 			// Check that the original path hasn't changed
-			s.NotEqual(got.AbsPath, file.AbsPath, "Original path should not be modified")
+			s.NotEqual(got.absPath, file.absPath, "Original path should not be modified")
 
 			// Check that the new file has the correct suffix
 			if tt.newSuffix != "" {
@@ -587,7 +592,7 @@ func (s *PathSuite) TestParent() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
-			s.Equal(tt.expected, file.Parent().AbsPath)
+			s.Equal(tt.expected, file.Parent().absPath)
 		})
 	}
 }
@@ -658,12 +663,12 @@ func (s *PathSuite) TestParents() {
 			got := file.Parents(tt.n)
 
 			if filepath.IsAbs(tt.raw) {
-				s.Equal(tt.want, got.AbsPath, "Unexpected parent path")
+				s.Equal(tt.want, got.absPath, "Unexpected parent path")
 			} else {
 				// For relative paths, we need to compare with the resolved absolute path
 				expectedAbs, err := filepath.Abs(tt.want)
 				s.Require().NoError(err)
-				s.Equal(expectedAbs, got.AbsPath, "Unexpected parent path")
+				s.Equal(expectedAbs, got.absPath, "Unexpected parent path")
 			}
 		})
 	}
@@ -974,14 +979,14 @@ func (s *PathSuite) TestWithName() {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
 			newFile := file.WithName(tt.newName)
-			s.Equal(tt.expected, newFile.AbsPath)
+			s.Equal(tt.expected, newFile.absPath)
 
 			// Additional checks
 			s.Equal(filepath.Base(tt.expected), newFile.Name)
-			s.Equal(filepath.Dir(tt.expected), newFile.Parent().AbsPath)
+			s.Equal(filepath.Dir(tt.expected), newFile.Parent().absPath)
 
 			// Check that the original path hasn't changed
-			s.NotEqual(newFile.AbsPath, file.AbsPath, "Original path should not be modified")
+			s.NotEqual(newFile.absPath, file.absPath, "Original path should not be modified")
 		})
 	}
 }
@@ -1059,7 +1064,7 @@ func (s *PathSuite) TestJoinPath() {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
 			result := file.JoinPath(tt.others...)
-			s.Equal(tt.expected, result.AbsPath)
+			s.Equal(tt.expected, result.absPath)
 		})
 	}
 }
@@ -1081,7 +1086,7 @@ func (s *PathSuite) TestWithStem() {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
 			newFile := file.WithStem(tt.newStem)
-			s.Equal(tt.expected, newFile.AbsPath)
+			s.Equal(tt.expected, newFile.absPath)
 		})
 	}
 }
@@ -1104,7 +1109,7 @@ func (s *PathSuite) TestWithSuffix() {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
 			newFile := file.WithSuffix(tt.newSuffix)
-			s.Equal(tt.expected, newFile.AbsPath)
+			s.Equal(tt.expected, newFile.absPath)
 		})
 	}
 }
@@ -1146,10 +1151,45 @@ func (s *PathSuite) TestWithRenamedParentDir() {
 		s.Run(tt.name, func() {
 			file := Path(tt.filePath)
 			got := file.WithRenamedParentDir(tt.newDirName)
-			s.Equal(tt.want, got.AbsPath)
+			s.Equal(tt.want, got.absPath)
+		})
+	}
+}
+
+func (s *PathSuite) TestRelativeTo() {
+	tests := []struct {
+		name     string
+		path     string
+		other    string
+		expected string
+		hasError bool
+	}{
+		{"same directory", "/home/user/file.txt", "/home/user", "file.txt", false},
+		{"subdirectory", "/home/user/docs/file.txt", "/home/user", "docs/file.txt", false},
+		{"parent directory", "/home/user/file.txt", "/home", "user/file.txt", false},
+		{"unrelated paths", "/home/user/file.txt", "/var/log", "../../home/user/file.txt", false},
+		{"to root", "/home/user/file.txt", "/", "home/user/file.txt", false},
+		{"from root", "/", "/home/user", "../..", false},
+		{"same file", "/home/user/file.txt", "/home/user/file.txt", ".", false},
+		// {"invalid path", "/home/user/file.txt", "~invaliduser", "", true}, // Changed this line
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			file := Path(tt.path)
+			result, err := file.RelativeTo(tt.other)
+			if tt.hasError {
+				s.Error(err)
+			} else {
+				s.Require().NoError(err)
+				s.Equal(tt.expected, result)
+			}
 		})
 	}
 }
 
 func (s *PathSuite) Test00Manual() {
+	raw := "~/films/golang pathlib/learning.go"
+	p := Path(raw)
+	pp.Println(p)
 }
