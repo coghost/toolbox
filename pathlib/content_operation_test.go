@@ -144,3 +144,30 @@ func (s *PathSuite) TestMustAppendBytes() {
 	s.Require().NoError(err)
 	s.Equal(append([]byte(_testContent), additionalContent...), content)
 }
+
+func (s *PathSuite) TestCalculateMD5() {
+	// Create a temporary file with known content
+	tempDir := s.T().TempDir()
+	filePath := Path(tempDir).Join("test_file.txt")
+	content := "Hello, World!"
+	err := filePath.WriteText(content)
+	s.Require().NoError(err)
+
+	// Calculate MD5
+	md5hash, err := filePath.GetMD5()
+	s.Require().NoError(err)
+
+	// Expected MD5 hash for "Hello, World!"
+	expectedMD5 := "65a8e27d8879283831b664bd8b7f0ad4"
+	s.Equal(expectedMD5, md5hash)
+
+	// Test with non-existent file
+	nonExistentFile := Path(tempDir).Join("non_existent.txt")
+	_, err = nonExistentFile.GetMD5()
+	s.Require().Error(err)
+
+	// Test with directory
+	dirPath := Path(tempDir)
+	_, err = dirPath.GetMD5()
+	s.Require().Error(err)
+}

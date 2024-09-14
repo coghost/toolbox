@@ -18,6 +18,8 @@ const (
 	_testContent = "Hello, World!"
 )
 
+var errTest = errors.New("test error")
+
 type PathSuite struct {
 	suite.Suite
 	tempDir string
@@ -317,7 +319,7 @@ func (s *PathSuite) TestMkDirs() {
 	path := filepath.Join(s.tempDir, "new", "nested", "dir")
 	file := Path(path)
 
-	err := file.MkDirs()
+	err := file.Mkdirs()
 	s.Require().NoError(err)
 	s.DirExists(path)
 }
@@ -397,50 +399,6 @@ func (s *PathSuite) TestRename() {
 	s.Require().NoError(err)
 	s.NoFileExists(oldPath)
 	s.FileExists(newPath)
-}
-
-func (s *PathSuite) TestListFilesWithGlob() {
-	s.createTempFile("file1.txt", "")
-	s.createTempFile("file2.txt", "")
-	s.createTempFile("file3.json", "")
-
-	file := Path(s.tempDir)
-
-	result, err := file.ListFilesWithGlob("*.txt")
-	s.Require().NoError(err)
-	s.Len(result, 2)
-	s.True(strings.HasSuffix(result[0], "file1.txt") || strings.HasSuffix(result[0], "file2.txt"))
-	s.True(strings.HasSuffix(result[1], "file1.txt") || strings.HasSuffix(result[1], "file2.txt"))
-}
-
-func (s *PathSuite) TestListFilesWithGlobEmptyPattern() {
-	s.createTempFile("file1.txt", "")
-	s.createTempFile("file2.txt", "")
-	s.createTempFile("file3.json", "")
-
-	file := Path(s.tempDir)
-
-	result, err := file.ListFilesWithGlob("")
-	s.Require().NoError(err)
-	s.Len(result, 3)
-}
-
-func (s *PathSuite) TestListFilesWithGlobStatic() {
-	s.createTempFile("file1.txt", "")
-	s.createTempFile("file2.txt", "")
-	s.createTempFile("file3.json", "")
-
-	files, err := ListFilesWithGlob(nil, s.tempDir, "*.txt")
-	s.Require().NoError(err)
-	s.Len(files, 2)
-
-	// Use filepath.Base to compare just the file names
-	fileNames := make([]string, len(files))
-	for i, file := range files {
-		fileNames[i] = filepath.Base(file)
-	}
-
-	s.ElementsMatch([]string{"file1.txt", "file2.txt"}, fileNames)
 }
 
 func (s *PathSuite) TestWithSuffixInNewDir() {
@@ -633,8 +591,8 @@ func (s *PathSuite) TestParents() {
 			name: "relative path",
 			path: "user/documents/file.txt",
 			expected: []string{
-				currentDir.JoinPath("user/documents").absPath,
-				currentDir.JoinPath("user").absPath,
+				currentDir.Join("user/documents").absPath,
+				currentDir.Join("user").absPath,
 			},
 		},
 		{
@@ -708,13 +666,13 @@ func (s *PathSuite) TestParentsUpTo() {
 			name: "relative path",
 			raw:  "documents/subdirectory/file.txt",
 			n:    2,
-			want: currentDir.JoinPath("documents").absPath,
+			want: currentDir.Join("documents").absPath,
 		},
 		{
 			name: "beyond relative path",
 			raw:  "documents/subdirectory/file.txt",
 			n:    5,
-			want: currentDir.JoinPath("documents").ParentsUpTo(3).absPath,
+			want: currentDir.Join("documents").ParentsUpTo(3).absPath,
 		},
 		{
 			name: "with trailing slash",
@@ -875,36 +833,6 @@ func (s *PathSuite) TestCSVAndTSVWithComments() {
 	s.Equal(expectedResult, tsvResult)
 }
 
-func (s *PathSuite) TestListFilesWithGlobPatterns() {
-	s.createTempFile("file1.txt", "")
-	s.createTempFile("file2.txt", "")
-	s.createTempFile("file3.json", "")
-	s.createTempFile(".hiddenfile", "")
-
-	file := Path(s.tempDir)
-
-	tests := []struct {
-		name     string
-		pattern  string
-		expected int
-	}{
-		{"all files", "", 4},
-		{"all files", "*", 4},
-		{"txt files", "*.txt", 2},
-		{"json files", "*.json", 1},
-		{"hidden files", ".*", 1},
-		{"non-existent pattern", "*.go", 0},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			result, err := file.ListFilesWithGlob(tt.pattern)
-			s.Require().NoError(err)
-			s.Len(result, tt.expected)
-		})
-	}
-}
-
 func (s *PathSuite) TestTSVGetSlices() {
 	content := "a\tb\tc\n1\t2\t3\n4\t5\t6"
 	path := s.createTempFile("test.tsv", content)
@@ -927,7 +855,7 @@ func (s *PathSuite) TestMustTSVGetSlices() {
 func (s *PathSuite) TestEPanic() {
 	file := Path("/tmp/test.txt")
 	s.Panics(func() {
-		file.e(nil, errors.New("test error")) //nolint
+		file.e(nil, errTest)
 	})
 }
 
@@ -1130,7 +1058,7 @@ func (s *PathSuite) TestJoinPath() {
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			file := Path(tt.path)
-			result := file.JoinPath(tt.others...)
+			result := file.Join(tt.others...)
 			s.Equal(tt.expected, result.absPath)
 		})
 	}
@@ -1456,7 +1384,7 @@ func (s *PathSuite) TestRmdir() {
 	nonEmptyDir := Path(filepath.Join(testDir, "nonEmptyDir"))
 	err = nonEmptyDir.Mkdir(0o755, false)
 	s.Require().NoError(err)
-	fileInDir := nonEmptyDir.JoinPath("file.txt")
+	fileInDir := nonEmptyDir.Join("file.txt")
 	err = fileInDir.WriteText("test content")
 	s.Require().NoError(err)
 

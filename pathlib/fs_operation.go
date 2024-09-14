@@ -15,6 +15,36 @@ var (
 	ErrCannotUnlinkDir   = errors.New("cannot unlink directory: use Rmdir() instead")
 )
 
+// Copy creates a copy of the file at the current path to a new location.
+//
+// This method copies the content of the current file to a new file at the specified path.
+// It also attempts to preserve the file mode (permissions) of the original file.
+//
+// Parameters:
+//   - newfile: A string representing the path where the new copy should be created.
+//
+// Returns:
+//   - error: An error if the operation failed. Possible reasons for failure include:
+//   - The source file cannot be opened for reading.
+//   - The destination file cannot be created or opened for writing.
+//   - An error occurs during the copy operation.
+//   - The file mode (permissions) cannot be set on the new file.
+//
+// The method performs the following steps:
+// 1. Opens the source file for reading.
+// 2. Creates the destination file.
+// 3. Copies the content from the source to the destination.
+// 4. Attempts to set the file mode of the new file to match the original.
+//
+// Example:
+//
+//	sourcePath := Path("/path/to/source/file.txt")
+//	err := sourcePath.Copy("/path/to/destination/file_copy.txt")
+//	if err != nil {
+//	    log.Fatalf("Failed to copy file: %v", err)
+//	}
+//
+// Note: This method does not handle copying directories. It's designed for single file operations.
 func (p *FsPath) Copy(newfile string) error {
 	sourceFile, err := p.Reader()
 	if err != nil {
@@ -40,8 +70,8 @@ func (p *FsPath) Copy(newfile string) error {
 	return err
 }
 
-// MkDirs quick create dir for given path with MkdirAll.
-func (p *FsPath) MkDirs() error {
+// Mkdirs quick create dir for given path with MkdirAll.
+func (p *FsPath) Mkdirs() error {
 	return p.fs.MkdirAll(p.absPath, DirMode755)
 }
 

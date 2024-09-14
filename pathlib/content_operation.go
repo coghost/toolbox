@@ -1,7 +1,11 @@
 package pathlib
 
 import (
+	"crypto/md5"
 	"encoding/csv"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -44,6 +48,66 @@ func (p *FsPath) GetString() (string, error) {
 	}
 
 	return string(data), nil
+}
+
+// GetJSON reads the file and unmarshals its content into the provided interface.
+//
+// This method reads the entire file content using GetBytes, then uses json.Unmarshal
+// to parse the JSON data into the provided interface.
+//
+// Parameters:
+//   - v: A pointer to the variable where the unmarshaled data should be stored.
+//
+// Returns:
+//   - error: An error if the file cannot be read or if the JSON unmarshaling fails.
+//
+// Example usage:
+//
+//	type Config struct {
+//	    Name    string `json:"name"`
+//	    Version int    `json:"version"`
+//	}
+//
+//	var config Config
+//	err := path.GetJSON(&config)
+//	if err != nil {
+//	    // handle error
+//	}
+//	fmt.Printf("Name: %s, Version: %d\n", config.Name, config.Version)
+//
+// Note: This method reads the entire file into memory. For very large files,
+// consider using a streaming JSON parser instead.
+func (p *FsPath) GetJSON(raw interface{}) error {
+	data, err := p.GetBytes()
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(data, raw)
+}
+
+// MustGetJSON reads the file, unmarshals its content into the provided interface, and panics on error.
+//
+// This method is similar to GetJSON but panics if an error occurs during reading or unmarshaling.
+//
+// Parameters:
+//   - v: A pointer to the variable where the unmarshaled data should be stored.
+//
+// Example usage:
+//
+//	type Config struct {
+//	    Name    string `json:"name"`
+//	    Version int    `json:"version"`
+//	}
+//
+//	var config Config
+//	path.MustGetJSON(&config)
+//	fmt.Printf("Name: %s, Version: %d\n", config.Name, config.Version)
+//
+// Note: Use this method only when you're sure the file exists and contains valid JSON,
+// or if you want to halt execution on error.
+func (p *FsPath) MustGetJSON(v interface{}) {
+	p.e(p.GetJSON(v))
 }
 
 // Reader returns an io.Reader for the file
@@ -223,4 +287,20 @@ func (p *FsPath) appendData(data []byte) error {
 	_, err = file.Write(data)
 
 	return err
+}
+
+// GetMD5 calculates the MD5 hash of the file at the given path.
+func (p *FsPath) GetMD5() (string, error) {
+	file, err := p.fs.Open(p.absPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file for MD5 calculation: %w", err)
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("failed to calculate MD5 hash: %w", err)
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

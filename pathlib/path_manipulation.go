@@ -114,7 +114,7 @@ func (p *FsPath) Dir() *FsPath {
 	return Path(filepath.Dir(p.absPath))
 }
 
-// JoinPath joins one or more path components to the current path.
+// Join joins one or more path components to the current path.
 //
 // If the current FSPath represents a file, the method joins the components
 // to the parent directory of the file. If it's a directory, it joins directly
@@ -129,17 +129,17 @@ func (p *FsPath) Dir() *FsPath {
 // Examples:
 //
 //  1. For a directory "/home/user":
-//     path.JoinPath("documents", "file.txt") returns a new FSPath for "/home/user/documents/file.txt"
+//     path.Join("documents", "file.txt") returns a new FSPath for "/home/user/documents/file.txt"
 //
 //  2. For a file "/home/user/file.txt":
-//     path.JoinPath("documents", "newfile.txt") returns a new FSPath for "/home/user/documents/newfile.txt"
+//     path.Join("documents", "newfile.txt") returns a new FSPath for "/home/user/documents/newfile.txt"
 //
 //  3. For a path "/":
-//     path.JoinPath("etc", "config") returns a new FSPath for "/etc/config"
+//     path.Join("etc", "config") returns a new FSPath for "/etc/config"
 //
 // Note: This method does not modify the original FSPath instance or create any directories.
 // It only returns a new FSPath instance representing the joined path.
-func (p *FsPath) JoinPath(others ...string) *FsPath {
+func (p *FsPath) Join(others ...string) *FsPath {
 	if len(others) > 0 && filepath.IsAbs(others[0]) {
 		// If the first component is an absolute path, use it as the base
 		return Path(filepath.Join(others...))
@@ -389,13 +389,13 @@ func (p *FsPath) Split(pathStr string) (dir, name string) {
 // Note: This method does not actually rename the file or directory on the file system.
 // It only creates a new FSPath instance with the updated name.
 func (p *FsPath) WithName(name string) *FsPath {
-	return p.Parent().JoinPath(name)
+	return p.Parent().Join(name)
 }
 
 func (p *FsPath) WithStem(stem string) *FsPath {
 	newName := stem + p.Suffix
 
-	return p.Parent().JoinPath(newName)
+	return p.Parent().Join(newName)
 }
 
 func (p *FsPath) WithSuffix(suffix string) *FsPath {
@@ -460,7 +460,7 @@ func (p *FsPath) WithRenamedParentDir(newParentName string) *FsPath {
 	newDir := parentDir.WithName(newParentName)
 
 	// Join the new directory with the current file name
-	return newDir.JoinPath(p.Name)
+	return newDir.Join(p.Name)
 }
 
 // WithSuffixAndSuffixedParentDir generates a new file path with a changed suffix,
@@ -508,7 +508,7 @@ func (p *FsPath) WithSuffixAndSuffixedParentDir(newSuffix string) *FsPath {
 
 	// Handle root directory case
 	if p.Parent().absPath == "/" {
-		return p.Parent().JoinPath("_"+dirSuffix, newPath.Name)
+		return p.Parent().Join("_"+dirSuffix, newPath.Name)
 	}
 
 	// Create new directory name and rename the parent directory

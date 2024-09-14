@@ -11,11 +11,13 @@ import (
 )
 
 const (
+	_mode500 = 0o500
 	_mode555 = 0o555
 	_mode600 = 0o600
 	_mode644 = 0o644 // Read and write for owner, read for group and others
 	_mode666 = 0o666
 	_mode755 = 0o755 // Read, write, and execute for owner, read and execute for group and others
+	_mode777 = 0o777
 )
 
 var (
@@ -198,12 +200,14 @@ func parseFileName(name string) (stem, fullName, suffix string) {
 	suffix = filepath.Ext(name)
 	stem = strings.TrimSuffix(name, suffix)
 
+	const hiddenDotLen = 3
+
 	// Special handling for hidden files
 	if strings.HasPrefix(name, ".") {
 		if len(name) > 1 && strings.Contains(name[1:], ".") {
 			// Hidden file with extension
-			parts := strings.SplitN(name, ".", 3)
-			if len(parts) == 3 {
+			parts := strings.SplitN(name, ".", hiddenDotLen)
+			if len(parts) == hiddenDotLen {
 				stem = "." + parts[1]
 				suffix = "." + parts[2]
 			}

@@ -1,6 +1,8 @@
 package pathlib
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -174,4 +176,121 @@ func getUserHomeDir(username string) (string, error) {
 	}
 
 	return u.HomeDir, nil
+}
+
+// IsJSON checks if the given byte slice contains valid JSON data.
+//
+// This function attempts to unmarshal the input data into a json.RawMessage.
+// If the unmarshal operation succeeds, it means the data is valid JSON.
+//
+// Parameters:
+//   - data: A byte slice containing the data to be checked.
+//
+// Returns:
+//   - bool: true if the data is valid JSON, false otherwise.
+//
+// The function returns true for valid JSON structures including objects,
+// arrays, strings, numbers, booleans, and null. It returns false for any
+// input that cannot be parsed as valid JSON.
+//
+// Example:
+//
+//	validJSON := []byte(`{"name": "John", "age": 30}`)
+//	fmt.Println(IsJSON(validJSON))  // Output: true
+//
+//	invalidJSON := []byte(`{"name": "John", "age": }`)
+//	fmt.Println(IsJSON(invalidJSON))  // Output: false
+//
+// Note: This function does not provide information about why the JSON might
+// be invalid. For more detailed error information, use json.Unmarshal directly.
+func IsJSON(data []byte) bool {
+	var js json.RawMessage
+	return json.Unmarshal(data, &js) == nil
+}
+
+// StructToJSONMap converts a struct to a map[string]interface{} representation of JSON.
+// This function uses JSON marshaling and unmarshaling to perform the conversion,
+// which means it respects JSON tags and only includes exported fields.
+//
+// Parameters:
+//   - src: The source struct to convert.
+//
+// Returns:
+//   - map[string]interface{}: A map representing the JSON structure of the input struct.
+//   - error: An error if the conversion process fails.
+//
+// Example usage:
+//
+//	type Person struct {
+//	    Name string `json:"name"`
+//	    Age  int    `json:"age"`
+//	}
+//
+//	person := Person{Name: "John Doe", Age: 30}
+//	jsonMap, err := StructToJSONMap(person)
+//	if err != nil {
+//	    // Handle error
+//	}
+//	// jsonMap will be: map[string]interface{}{"name": "John Doe", "age": 30}
+//
+// Note: This function will only include fields that would be marshaled to JSON.
+// Unexported fields and fields with `json:"-"` tags will be omitted.
+func StructToJSONMap(src interface{}) (map[string]interface{}, error) {
+	jsonData, err := json.Marshal(src)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal struct to JSON: %w", err)
+	}
+
+	// Then unmarshal the JSON to a map
+	var result map[string]interface{}
+
+	err = json.Unmarshal(jsonData, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// SanitizeJSON cleans a JSON string by removing empty fields.
+// It unmarshals the raw JSON into the provided struct template,
+// then marshals it back to JSON, effectively removing any empty or zero-value fields.
+//
+// Parameters:
+//   - rawJSON: The input JSON string to sanitize.
+//   - template: A pointer to a struct that defines the expected schema of the JSON.
+//
+// Returns:
+//   - []byte: The sanitized JSON as a byte slice.
+//   - error: Any error encountered during the process.
+//
+// Example usage:
+//
+//	type Person struct {
+//	    Name string `json:"name,omitempty"`
+//	    Age  int    `json:"age,omitempty"`
+//	}
+//
+//	input := `{"name":"John","age":0,"extra":""}`
+//	cleaned, err := SanitizeJSON(input, &Person{})
+//	if err != nil {
+//	    // Handle error
+//	}
+//	// cleaned will be: `{"name":"John"}`
+//
+// Note: This function relies on the `omitempty` tag for fields that should be
+// removed when empty. Make sure your struct is properly tagged for the desired behavior.
+func SanitizeJSON(rawJSON string, template interface{}) ([]byte, error) {
+	// Unmarshal raw JSON into the provided struct template
+	if err := json.Unmarshal([]byte(rawJSON), template); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	// Marshal the struct back to JSON, which will omit empty fields
+	sanitized, err := json.Marshal(template)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal sanitized struct: %w", err)
+	}
+
+	return sanitized, nil
 }

@@ -1,6 +1,7 @@
 package pathlib
 
 import (
+	"io/fs"
 	"path/filepath"
 
 	"github.com/spf13/afero"
@@ -80,4 +81,27 @@ func ListFilesWithGlob(fs afero.Fs, rootDir, pattern string) ([]string, error) {
 	}
 
 	return afero.Glob(fs, filepath.Join(Expand(rootDir), pattern))
+}
+
+// WalkFunc is the type of the function called for each file or directory visited by Walk.
+// It's the same as filepath.WalkFunc but uses afero.Fs.
+type WalkFunc func(path string, info fs.FileInfo, err error) error
+
+// Walk walks the file tree rooted at the FsPath, calling walkFn for each file or directory
+// in the tree, including the root.
+func (p *FsPath) Walk(walkFn WalkFunc) error {
+	return afero.Walk(p.fs, p.absPath, func(path string, info fs.FileInfo, err error) error {
+		// Convert the absolute path to a relative path
+		relPath, relErr := filepath.Rel(p.absPath, path)
+		if relErr != nil {
+			return relErr
+		}
+
+		// If it's the root, use "." as the relative path
+		if relPath == "." && info.IsDir() {
+			relPath = "."
+		}
+
+		return walkFn(relPath, info, err)
+	})
 }
