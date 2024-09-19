@@ -4,9 +4,26 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/suite"
 )
 
-func (s *PathSuite) TestHome() {
+type UtilSuite struct {
+	suite.Suite
+}
+
+func TestUtil(t *testing.T) {
+	suite.Run(t, new(UtilSuite))
+}
+
+func (s *UtilSuite) SetupSuite() {
+}
+
+func (s *UtilSuite) TearDownSuite() {
+}
+
+func (s *UtilSuite) TestHome() {
 	home, err := Home()
 	s.NoError(err)
 	s.NotNil(home)
@@ -16,7 +33,7 @@ func (s *PathSuite) TestHome() {
 	s.Equal(userHome, home.absPath)
 }
 
-func (s *PathSuite) TestCwd() {
+func (s *UtilSuite) TestCwd() {
 	cwd, err := Cwd()
 	s.NoError(err)
 	s.NotNil(cwd)
@@ -26,7 +43,7 @@ func (s *PathSuite) TestCwd() {
 	s.Equal(expected, cwd.absPath)
 }
 
-func (s *PathSuite) TestExpandUser() {
+func (s *UtilSuite) TestExpandUser() {
 	currentUser, err := user.Current()
 	s.Require().NoError(err)
 
@@ -52,27 +69,7 @@ func (s *PathSuite) TestExpandUser() {
 	}
 }
 
-// func (s *PathSuite) TestExpand() {
-// 	tests := []struct {
-// 		name     string
-// 		path     string
-// 		expected string
-// 	}{
-// 		{"home directory", "~/documents", filepath.Join(os.Getenv("HOME"), "documents")},
-// 		{"environment variable", "$HOME/documents", filepath.Join(os.Getenv("HOME"), "documents")},
-// 		{"no expansion needed", "/tmp/file.txt", "/tmp/file.txt"},
-// 		{"empty path", "", ""},
-// 	}
-
-// 	for _, tt := range tests {
-// 		s.Run(tt.name, func() {
-// 			expanded := Expand(tt.path)
-// 			s.Equal(tt.expected, expanded)
-// 		})
-// 	}
-// }
-
-func (s *PathSuite) TestExpand() {
+func (s *UtilSuite) TestExpand() {
 	// Save the original environment
 	origHome := os.Getenv("HOME")
 	origUser := os.Getenv("USER")

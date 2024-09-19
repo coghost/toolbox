@@ -1,8 +1,10 @@
 package pathlib
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -293,4 +295,12 @@ func SanitizeJSON(rawJSON string, template interface{}) ([]byte, error) {
 	}
 
 	return sanitized, nil
+}
+
+func ToSlices(reader io.Reader, separator rune) ([][]string, error) {
+	r := csv.NewReader(reader)
+	r.Comma = separator
+	r.Comment = '#'
+
+	return r.ReadAll()
 }

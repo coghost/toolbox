@@ -2,14 +2,19 @@ package pathlib
 
 import (
 	"crypto/md5"
-	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/afero"
+)
+
+const (
+	SepRuneCsv = ','
+	SepRuneTsv = '\t'
 )
 
 func (p *FsPath) MustGetBytes() []byte {
@@ -48,6 +53,72 @@ func (p *FsPath) GetString() (string, error) {
 	}
 
 	return string(data), nil
+}
+
+// GetLines reads the file and returns its contents as a slice of strings.
+//
+// Each string in the returned slice represents a line in the file.
+// The newline characters are stripped from the end of each line.
+//
+// Returns:
+//   - []string: A slice containing each line of the file.
+//   - error: An error if the file cannot be read or processed.
+//
+// Example usage:
+//
+//	lines, err := path.GetLines()
+//	if err != nil {
+//		// handle error
+//	}
+//	for _, line := range lines {
+//		fmt.Println(line)
+//	}
+//
+// Note: This method reads the entire file into memory. For very large files,
+// consider using a streaming approach instead.
+func (p *FsPath) GetLines() ([]string, error) {
+	content, err := p.GetString()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(content, "\n")
+
+	// Remove any trailing empty lines
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	// Trim any trailing \r from each line (for Windows-style line endings)
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, "\r")
+	}
+
+	return lines, nil
+}
+
+// MustGetLines reads the file and returns its contents as a slice of strings.
+// It panics if an error occurs.
+//
+// This is a convenience wrapper around GetLines.
+//
+// Returns:
+//   - []string: A slice containing each line of the file.
+//
+// Example usage:
+//
+//	lines := path.MustGetLines()
+//	for _, line := range lines {
+//		fmt.Println(line)
+//	}
+//
+// Note: Use this method only when you're sure the file exists and can be read,
+// or if you want to halt execution on error.
+func (p *FsPath) MustGetLines() []string {
+	lines, err := p.GetLines()
+	p.e(err)
+
+	return lines
 }
 
 // GetJSON reads the file and unmarshals its content into the provided interface.
@@ -141,7 +212,7 @@ func (p *FsPath) Reader() (io.Reader, error) {
 // Note: This method reads the entire file into memory. For very large files,
 // consider using a streaming approach instead.
 func (p *FsPath) CSVGetSlices() ([][]string, error) {
-	return p.readDelimitedFile(',')
+	return p.readDelimitedFile(SepRuneCsv)
 }
 
 func (p *FsPath) MustCSVGetSlices() [][]string {
@@ -177,7 +248,7 @@ func (p *FsPath) MustCSVGetSlices() [][]string {
 // Note: This method reads the entire file into memory. For very large files,
 // consider using a streaming approach instead.
 func (p *FsPath) TSVGetSlices() ([][]string, error) {
-	return p.readDelimitedFile('\t')
+	return p.readDelimitedFile(SepRuneTsv)
 }
 
 func (p *FsPath) MustTSVGetSlices() [][]string {
@@ -193,11 +264,7 @@ func (p *FsPath) readDelimitedFile(separator rune) ([][]string, error) {
 		return nil, err
 	}
 
-	r := csv.NewReader(reader)
-	r.Comma = separator
-	r.Comment = '#'
-
-	return r.ReadAll()
+	return ToSlices(reader, separator)
 }
 
 // WriteText writes the given string data to the file, creating the file if it doesn't exist,
