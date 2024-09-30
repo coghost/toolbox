@@ -517,3 +517,49 @@ func (p *FsPath) WithSuffixAndSuffixedParentDir(newSuffix string) *FsPath {
 	// Use WithRenamedParentDir to create the new path
 	return newPath.WithRenamedParentDir(newDirName)
 }
+
+// LastNSegments returns the last n segments of the path.
+//
+//   - If n is 0, it returns just the file name.
+//   - If n is greater than or equal to the number of segments, it returns the full path.
+func (p *FsPath) LastNSegments(num int) string {
+	if p.RawPath == "" {
+		return p.RawPath
+	}
+
+	if num <= 0 {
+		return p.Name
+	}
+
+	// Split the path into segments
+	segments := strings.Split(p.RawPath, string(os.PathSeparator))
+
+	if num >= len(segments) {
+		return p.RawPath
+	}
+
+	// Use ParentsUpTo to get the parent directory n levels up
+	parentPath := p.ParentsUpTo(num)
+
+	// If parentPath is the same as p, it means we've reached the root or n is greater than the number of segments
+	if parentPath.RawPath == p.RawPath {
+		return p.RawPath
+	}
+
+	// Get the relative path from parentPath to p
+	relPath, err := p.RelativeTo(parentPath.RawPath)
+	if err != nil {
+		// If there's an error, fall back to returning the full path
+		return p.RawPath
+	}
+
+	// Join the relative path with the last segment of parentPath
+	return filepath.Join(filepath.Base(parentPath.RawPath), relPath)
+}
+
+// LastSegment returns the last segment of the path.
+//
+//	This is equivalent to calling LastNSegments(1).
+func (p *FsPath) LastSegment() string {
+	return p.LastNSegments(1)
+}
