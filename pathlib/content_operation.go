@@ -46,6 +46,13 @@ func (p *FsPath) SetString(data string) error {
 	return p.SetBytes([]byte(data))
 }
 
+func (p *FsPath) MustGetString() string {
+	b, err := p.GetString()
+	p.e(err)
+
+	return b
+}
+
 func (p *FsPath) GetString() (string, error) {
 	data, err := p.GetBytes()
 	if err != nil {

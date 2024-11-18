@@ -8,7 +8,15 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
+)
+
+var (
+	_, b, _, _ = runtime.Caller(0)
+
+	// rootDir folder of this project, you must config this in every project, this is just a demo usage.
+	rootDir = filepath.Join(filepath.Dir(b), "../..")
 )
 
 var userLookup = os.UserHomeDir // This can be overridden in tests

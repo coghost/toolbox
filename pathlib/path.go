@@ -58,7 +58,7 @@ type FsPath struct {
 	//
 	// Examples:
 	//   - For a file "document.txt", Suffix would be ".txt"
-	//   - For a file "archive.tar.gz", Suffix would be ".tar.gz"
+	//   - For a file "archive.tar.gz", Suffix would be ".gz"
 	//   - For a file "README" or a directory, Suffix would be ""
 	//
 	// This field is useful for identifying file types, filtering files by extension,
@@ -122,6 +122,12 @@ func (p *FsPath) String() string {
 
 func (p *FsPath) AbsPath() string {
 	return p.absPath
+}
+
+func (p *FsPath) NoSuffix(str string) string {
+	name := strings.TrimSuffix(p.Name, str)
+
+	return p.Dir().Join(name).absPath
 }
 
 func (p *FsPath) Fs() afero.Fs {

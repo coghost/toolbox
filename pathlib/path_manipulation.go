@@ -495,16 +495,21 @@ func (p *FsPath) WithRenamedParentDir(newParentName string) *FsPath {
 //	newPath := file.WithSuffixAndSuffixedParentDir(".pdf")
 //	// newPath now represents "/tmp/docs_pdf/report.pdf"
 func (p *FsPath) WithSuffixAndSuffixedParentDir(newSuffix string) *FsPath {
+	// If it's a directory, return the original path
+	if p.IsDir() {
+		return nil
+	}
+
 	// Ensure the new suffix starts with a dot
 	if newSuffix != "" && !strings.HasPrefix(newSuffix, ".") {
 		newSuffix = "." + newSuffix
 	}
 
-	// Remove the dot from the suffix for the directory name
-	dirSuffix := strings.TrimPrefix(newSuffix, ".")
-
 	// Change the file suffix
 	newPath := p.WithSuffix(newSuffix)
+
+	// Remove the dot from the suffix for the directory name
+	dirSuffix := strings.TrimPrefix(newSuffix, ".")
 
 	// Handle root directory case
 	if p.Parent().absPath == "/" {
@@ -516,6 +521,29 @@ func (p *FsPath) WithSuffixAndSuffixedParentDir(newSuffix string) *FsPath {
 
 	// Use WithRenamedParentDir to create the new path
 	return newPath.WithRenamedParentDir(newDirName)
+}
+
+func (p *FsPath) WithReplacedDirAndSuffix(dirName, newSuffix string) *FsPath {
+	// If it's a directory, return the original path
+	if p.IsDir() {
+		return nil
+	}
+
+	// Ensure the new suffix starts with a dot
+	if newSuffix != "" && !strings.HasPrefix(newSuffix, ".") {
+		newSuffix = "." + newSuffix
+	}
+
+	// Change the file suffix
+	newPath := p.WithSuffix(newSuffix)
+
+	// Handle root directory case
+	if p.Parent().absPath == "/" {
+		return p.Parent().Join(dirName, newPath.Name)
+	}
+
+	// Use WithRenamedParentDir to create the new path with the new directory name
+	return newPath.WithRenamedParentDir(dirName)
 }
 
 // LastNSegments returns the last n segments of the path.

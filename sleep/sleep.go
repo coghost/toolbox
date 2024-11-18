@@ -12,6 +12,11 @@ func CeilInt(a, b int) int {
 	return int(math.Ceil(float64(a) / float64(b)))
 }
 
+func RoundFloat(val float64, precision int) float64 {
+	ratio := math.Pow10(precision)
+	return float64(int(val*ratio)) / ratio
+}
+
 // RandFloatX1k returns a random integer value between (min * 1000) and (max * 1000).
 func RandFloatX1k(minNum, maxNum float64) int {
 	if minNum == maxNum {

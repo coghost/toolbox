@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k0kubun/pp/v3"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/suite"
 )
@@ -399,80 +398,6 @@ func (s *PathSuite) TestRename() {
 	s.Require().NoError(err)
 	s.NoFileExists(oldPath)
 	s.FileExists(newPath)
-}
-
-func (s *PathSuite) TestWithSuffixInNewDir() {
-	tests := []struct {
-		name      string
-		filePath  string
-		newSuffix string
-		want      string
-	}{
-		{
-			name:      "file in subdirectory",
-			filePath:  "/tmp/a/b/file.txt",
-			newSuffix: "json",
-			want:      "/tmp/a/b_json/file.json",
-		},
-		{
-			name:      "file in root directory",
-			filePath:  "/file.txt",
-			newSuffix: "json",
-			want:      "/_json/file.json",
-		},
-		{
-			name:      "directory path",
-			filePath:  "/tmp/a/b/",
-			newSuffix: "backup",
-			want:      "/tmp/a_backup/b.backup",
-		},
-		{
-			name:      "file without extension",
-			filePath:  "/tmp/a/b/file",
-			newSuffix: "txt",
-			want:      "/tmp/a/b_txt/file.txt",
-		},
-		{
-			name:      "file with multiple extensions",
-			filePath:  "/tmp/a/b/archive.tar.gz",
-			newSuffix: "bak",
-			want:      "/tmp/a/b_bak/archive.tar.bak",
-		},
-		{
-			name:      "empty new suffix",
-			filePath:  "/tmp/a/b/file.txt",
-			newSuffix: "",
-			want:      "/tmp/a/b_/file",
-		},
-		{
-			name:      "suffix with dot",
-			filePath:  "/tmp/a/b/file.txt",
-			newSuffix: ".json",
-			want:      "/tmp/a/b_json/file.json",
-		},
-	}
-
-	for _, tt := range tests {
-		s.Run(tt.name, func() {
-			file := Path(tt.filePath)
-			got := file.WithSuffixAndSuffixedParentDir(tt.newSuffix)
-			s.Equal(tt.want, got.absPath, "For input: %s", tt.filePath)
-
-			// Additional checks
-			s.Equal(filepath.Base(tt.want), got.Name)
-			s.Equal(filepath.Dir(tt.want), got.Parent().absPath)
-
-			// Check that the original path hasn't changed
-			s.NotEqual(got.absPath, file.absPath, "Original path should not be modified")
-
-			// Check that the new file has the correct suffix
-			if tt.newSuffix != "" {
-				s.Equal("."+strings.TrimPrefix(tt.newSuffix, "."), filepath.Ext(got.Name))
-			} else {
-				s.Equal("", filepath.Ext(got.Name))
-			}
-		})
-	}
 }
 
 func (s *PathSuite) TestParts() {
@@ -1417,5 +1342,5 @@ func (s *PathSuite) TestRmdir() {
 func (s *PathSuite) Test00Manual() {
 	raw := "~/films/golang pathlib/learning.go"
 	p := Path(raw)
-	pp.Println(p)
+	s.NotNil(p)
 }

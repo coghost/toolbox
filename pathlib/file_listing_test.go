@@ -4,8 +4,6 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
-
-	"github.com/k0kubun/pp/v3"
 )
 
 func (s *PathSuite) TestListFilesWithGlobStatic() {
@@ -20,7 +18,6 @@ func (s *PathSuite) TestListFilesWithGlobStatic() {
 	// Use filepath.Base to compare just the file names
 	fileNames := make([]string, len(files))
 	for i, file := range files {
-		pp.Println(file)
 		fileNames[i] = filepath.Base(file)
 	}
 
