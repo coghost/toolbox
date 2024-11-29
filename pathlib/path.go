@@ -137,7 +137,7 @@ func (p *FsPath) Fs() afero.Fs {
 // Exists check file exists or not.
 func (p *FsPath) Exists() bool {
 	_, err := p.Stat()
-	return err == nil
+	return err == nil || os.IsExist(err)
 }
 
 func (p *FsPath) Stat() (fs.FileInfo, error) {
